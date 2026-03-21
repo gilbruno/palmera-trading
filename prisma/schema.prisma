@@ -1,0 +1,620 @@
+// =============================================================================
+// PRISMA 7 - SCHEMA JOURNAL DE TRADING PERSONNEL
+// Provider : PostgreSQL (Neon) | Déploiement : Vercel
+// Usage    : Usage personnel, un seul trader
+// =============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+// Direction du trade
+enum Direction {
+  LONG
+  SHORT
+}
+
+// Classe d'actifs
+enum AssetClass {
+  FOREX
+  CRYPTO
+  STOCKS
+  FUTURES
+  OPTIONS
+  CFD
+  COMMODITIES
+  INDICES
+  BONDS
+}
+
+// Statut du trade : un trade peut être ouvert, partiellement fermé, ou clôturé
+enum TradeStatus {
+  OPEN
+  PARTIAL
+  CLOSED
+  CANCELLED // ex : ordre non déclenché, annulé manuellement
+}
+
+// Timeframe d'analyse principal
+enum Timeframe {
+  M1
+  M5
+  M15
+  M30
+  H1
+  H4
+  D1
+  W1
+  MN
+}
+
+// Résultat subjectif du trade (indépendant du PnL)
+enum TradeOutcome {
+  WIN
+  LOSS
+  BREAKEVEN
+}
+
+// Humeur / état psychologique lors de la session
+enum MoodLevel {
+  EXCELLENT  // Flow state, confiant, concentré
+  GOOD       // État normal, opérationnel
+  NEUTRAL    // Pas d'humeur particulière
+  BAD        // Fatigué, distrait, léger stress
+  TERRIBLE   // Revanche, peur, paralysie décisionnelle
+}
+
+// Type de snapshot d'equity
+enum EquitySnapshotType {
+  DAILY
+  WEEKLY
+  MONTHLY
+  MANUAL   // snapshot déclenché manuellement par le trader
+  DEPOSIT
+  WITHDRAWAL
+}
+
+// Type de note / journal entry
+enum JournalEntryType {
+  REFLECTION   // bilan de fin de journée / semaine
+  LESSON       // leçon apprise suite à un trade ou une session
+  PLAN         // plan de trading anticipé (pre-market)
+  IDEA         // idée de setup à surveiller
+  RULE         // règle que l'on se fixe
+  FREE         // entrée libre
+}
+
+// Statut de revue d'un trade
+enum ReviewStatus {
+  PENDING   // à revoir
+  REVIEWED  // revu et annoté
+  ARCHIVED  // archivé, plus pertinent
+}
+
+// =============================================================================
+// ENUMS ICT / SMC
+// =============================================================================
+
+// Modèle de prix ICT principal utilisé pour déclencher l'entrée
+enum IctModel {
+  ICT_2022           // modèle classique 2022 (FVG + OB + liquidity sweep)
+  SILVER_BULLET      // 10h-11h / 14h-15h NY — OB + FVG dans la kill zone
+  JUDAS_SWING        // faux mouvement initial de session pour piéger les retail
+  LONDON_OPEN_RECAP  // setup London Open (manipulation + distribution)
+  POWER_OF_3         // AMD : Accumulation / Manipulation / Distribution
+  BREAKER_BLOCK      // OB invalidé qui devient support/résistance inversé
+  MITIGATION_BLOCK   // bloc de mitigation après une structure cassée
+  PROPULSION_BLOCK   // bloc de continuation dans la direction du trend
+  FVG_FILL           // entrée sur comblement de Fair Value Gap
+  OTE                // Optimal Trade Entry (retracement 62-79% de Fibonacci)
+  TURTLE_SOUP        // stop hunt sous un low/high récent puis reversal
+  SCALP              // scalp intraday sans modèle ICT spécifique
+  OTHER              // autre modèle non listé
+}
+
+// Point d'intérêt (POI) utilisé comme zone d'entrée
+enum PoiType {
+  ORDER_BLOCK_BULL      // Order Block haussier (dernière bougie baissière avant impulsion haussière)
+  ORDER_BLOCK_BEAR      // Order Block baissier
+  BREAKER_BLOCK_BULL    // Breaker Block haussier (OB invalidé devenu support)
+  BREAKER_BLOCK_BEAR    // Breaker Block baissier
+  FVG_BULL              // Fair Value Gap haussier (imbalance à combler)
+  FVG_BEAR              // Fair Value Gap baissier
+  IFVG_BULL             // Inverted FVG haussier
+  IFVG_BEAR             // Inverted FVG baissier
+  MITIGATION_BLOCK_BULL // Mitigation Block haussier
+  MITIGATION_BLOCK_BEAR // Mitigation Block baissier
+  LIQUIDITY_VOID        // Void de liquidité (mouvement violent sans consolidation)
+  PREMIUM_ARRAY         // Zone premium (au-dessus de 50% du range)
+  DISCOUNT_ARRAY        // Zone discount (en-dessous de 50% du range)
+  EQUILIBRIUM           // 50% du range — zone de rejet potentiel
+  WEEKLY_OPEN           // Open de la semaine (niveau clé ICT)
+  DAILY_OPEN            // Open du jour (niveau clé ICT)
+  MIDNIGHT_OPEN         // Midnight Open (00h00 NY)
+  LONDON_OPEN           // Open Londres
+  ASIA_HIGH             // High de la session asiatique (zone de liquidité)
+  ASIA_LOW              // Low de la session asiatique (zone de liquidité)
+  PREV_DAY_HIGH         // Previous Day High
+  PREV_DAY_LOW          // Previous Day Low
+  PREV_WEEK_HIGH        // Previous Week High
+  PREV_WEEK_LOW         // Previous Week Low
+}
+
+// Session de marché dans laquelle le trade a été pris
+enum MarketSession {
+  ASIA          // Session asiatique (Tokyo)
+  LONDON        // Session Londres (kill zone : 02h-05h NY)
+  LONDON_CLOSE  // Fermeture Londres
+  NEW_YORK_AM   // New York matin (kill zone : 08h-11h NY)
+  NEW_YORK_PM   // New York après-midi (14h-16h NY)
+  SILVER_BULLET_AM // Kill zone Silver Bullet matin (10h-11h NY)
+  SILVER_BULLET_PM // Kill zone Silver Bullet PM (14h-15h NY)
+  OVERLAP       // Chevauchement Londres/New York
+  OFF_HOURS     // Hors sessions majeures
+}
+
+// Biais directionnel ICT sur les différents timeframes
+enum MarketBias {
+  BULLISH
+  BEARISH
+  NEUTRAL  // range, pas de biais clair
+}
+
+// Structure de marché (Market Structure)
+enum MarketStructure {
+  HH_HL   // Higher High / Higher Low — tendance haussière
+  LH_LL   // Lower High / Lower Low — tendance baissière
+  RANGE   // range, structure indéfinie
+  BOS_UP  // Break of Structure haussier
+  BOS_DOWN // Break of Structure baissier
+  CHOCH_UP  // Change of Character haussier (potentiel retournement)
+  CHOCH_DOWN // Change of Character baissier
+}
+
+// Type de liquidité visée ou sweepée
+enum LiquidityType {
+  BSL   // Buy Side Liquidity (highs, stops des shorts)
+  SSL   // Sell Side Liquidity (lows, stops des longs)
+  BOTH  // Les deux côtés (range avec equal highs/lows)
+  NONE  // Pas de liquidité spécifique visée
+}
+
+// =============================================================================
+// MODEL : Setup / Playbook
+// Un setup est une stratégie nommée avec ses règles d'entrée/sortie/gestion.
+// =============================================================================
+model Setup {
+  id          String   @id @default(cuid())
+  name        String   @unique // "Breakout London Open", "Pullback EMA 20", etc.
+  description String?  // description libre courte
+  // Règles structurées en texte riche (Markdown/JSON) pour une flexibilité maximale
+  entryRules  String?  // règles d'entrée
+  exitRules   String?  // règles de sortie
+  riskRules   String?  // règles de gestion du risque (SL, TP, trailing)
+  notes       String?  // observations personnelles, évolutions du setup
+  isActive    Boolean  @default(true) // permet de désactiver un setup obsolète
+  winRate     Decimal? @db.Decimal(5, 2) // % calculé ou saisi manuellement
+  avgRMultiple Decimal? @db.Decimal(8, 4) // R moyen historique sur ce setup
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  trades      Trade[]
+
+  @@index([isActive])
+  @@index([name])
+}
+
+// =============================================================================
+// MODEL : Tag
+// Tags libres pour catégoriser les trades au-delà du setup.
+// Exemples : "News trade", "Revenge", "FOMO", "Patience", "Good execution"
+// =============================================================================
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String?  // couleur HEX pour l'UI (#FF5733)
+  createdAt DateTime @default(now())
+
+  trades    TradeTag[]
+
+  @@index([name])
+}
+
+// Table de jointure Trade <-> Tag (many-to-many explicite)
+model TradeTag {
+  tradeId String
+  tagId   String
+
+  trade   Trade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  tag     Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([tradeId, tagId])
+  @@index([tagId])
+}
+
+// =============================================================================
+// MODEL : TradingSession
+// Une session = une journée de trading avec son contexte psychologique et bilan.
+// Un trader ouvre la journée, trade, ferme la journée, fait son bilan.
+// =============================================================================
+model TradingSession {
+  id              String     @id @default(cuid())
+  date            DateTime   @db.Date // date de la session (sans heure)
+  // Contexte pré-session
+  preMood         MoodLevel?
+  prePlan         String?    // plan de trading du matin (catalyseurs, niveaux clés)
+  energyLevel     Int?       // 1-10 : niveau d'énergie physique au démarrage
+  sleepHours      Decimal?   @db.Decimal(4, 1) // heures de sommeil
+  // Bilan post-session
+  postMood        MoodLevel?
+  postNotes       String?    // bilan de fin de journée
+  lessonLearned   String?    // la leçon principale de la journée
+  // Métriques agrégées calculées (dénormalisées pour performance)
+  totalPnl        Decimal?   @db.Decimal(15, 4) // PnL net de la journée
+  tradeCount      Int?       @default(0)
+  winCount        Int?       @default(0)
+  lossCount       Int?       @default(0)
+  breakevenCount  Int?       @default(0)
+  // Respect des règles (auto-évaluation 1-10)
+  ruleAdherence   Int?
+  // Drapeaux de comportement
+  hadRevenge      Boolean    @default(false) // trade de revanche ?
+  hadFomo         Boolean    @default(false) // FOMO ?
+  wasOvertraded   Boolean    @default(false) // overtrading ?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  trades          Trade[]
+  screenshots     Screenshot[]
+  journalEntries  JournalEntry[]
+
+  // Une seule session par date
+  @@unique([date])
+  @@index([date])
+}
+
+// =============================================================================
+// MODEL : Trade
+// Coeur du journal. Représente un trade complet (ouverture à fermeture).
+// Pour le scaling in/out, utiliser des TradeExecution enfants.
+// =============================================================================
+model Trade {
+  id            String      @id @default(cuid())
+
+  // --- Instrument ---
+  symbol        String      // "EURUSD", "BTC/USDT", "AAPL", "ES1!", etc.
+  assetClass    AssetClass
+  direction     Direction
+  status        TradeStatus @default(OPEN)
+  reviewStatus  ReviewStatus @default(PENDING)
+
+  // --- Session & Setup ---
+  sessionId     String?
+  session       TradingSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  setupId       String?
+  setup         Setup?    @relation(fields: [setupId], references: [id], onDelete: SetNull)
+
+  // --- Timing ---
+  entryTime     DateTime
+  exitTime      DateTime?
+  // Durée en secondes (calculée et stockée pour les queries rapides)
+  durationSec   Int?
+
+  // --- Timeframes ---
+  timeframeTrend     Timeframe? // timeframe de tendance (HTF)
+  timeframeEntry     Timeframe? // timeframe d'entrée (LTF)
+
+  // --- Niveaux de prix ---
+  entryPrice    Decimal    @db.Decimal(20, 8)
+  exitPrice     Decimal?   @db.Decimal(20, 8)
+  stopLoss      Decimal?   @db.Decimal(20, 8) // SL initial au moment de l'entrée
+  takeProfit1   Decimal?   @db.Decimal(20, 8) // TP1
+  takeProfit2   Decimal?   @db.Decimal(20, 8) // TP2 (optionnel)
+  takeProfit3   Decimal?   @db.Decimal(20, 8) // TP3 (optionnel)
+
+  // --- Position Sizing ---
+  // Quantité en unités de l'actif (actions, lots forex, contrats, BTC...)
+  quantity      Decimal    @db.Decimal(20, 8)
+  // Pour le forex : taille en lots (0.01, 0.1, 1.0, 2.5...)
+  lotSize       Decimal?   @db.Decimal(10, 4)
+  // Risque en % du capital sur ce trade
+  riskPercent   Decimal?   @db.Decimal(6, 4)
+  // Risque en valeur absolue (dans la devise du compte)
+  riskAmount    Decimal?   @db.Decimal(15, 4)
+  // Devise du compte de trading (EUR, USD, GBP...)
+  accountCurrency String   @default("USD")
+
+  // --- Frais & Coûts ---
+  commission    Decimal?   @db.Decimal(12, 4) // commissions broker
+  swap          Decimal?   @db.Decimal(12, 4) // swap/financement overnight
+  // Slippage observé en points/pips (peut être négatif = favorable)
+  slippage      Decimal?   @db.Decimal(10, 4)
+
+  // --- PnL (calculé et persisté) ---
+  pnlGross      Decimal?   @db.Decimal(15, 4) // PnL brut avant frais
+  pnlNet        Decimal?   @db.Decimal(15, 4) // PnL net après commission + swap
+  // R-Multiple = pnlNet / riskAmount (ex: +2.3R, -1.0R)
+  rMultiple     Decimal?   @db.Decimal(8, 4)
+  // PnL en pips (pour forex)
+  pipsResult    Decimal?   @db.Decimal(10, 2)
+
+  // --- MAE / MFE (Maximum Adverse/Favorable Excursion) ---
+  // Prix le plus défavorable atteint pendant le trade
+  mae           Decimal?   @db.Decimal(20, 8)
+  // Prix le plus favorable atteint pendant le trade
+  mfe           Decimal?   @db.Decimal(20, 8)
+  // MAE/MFE en termes de R (ratio par rapport au risque initial)
+  maeR          Decimal?   @db.Decimal(8, 4)
+  mfeR          Decimal?   @db.Decimal(8, 4)
+  // Efficiency : combien du MFE a été capturé (0-100%)
+  // Calculé = pnlGross / (mfe - entryPrice) * 100
+  efficiency    Decimal?   @db.Decimal(6, 2)
+
+  // --- Résultat subjectif ---
+  // WIN/LOSS/BREAKEVEN peut diverger du PnL (ex: bon trade mal géré)
+  outcome       TradeOutcome?
+
+  // --- Contexte marché ---
+  marketContext String?    // description libre du contexte de marché
+  catalyst      String?    // catalyseur fondamental ou technique (ex: NFP, breakout)
+  // Score de qualité du trade (auto-évaluation 1-10)
+  qualityScore  Int?
+
+  // --- Notes ---
+  preTradeNotes  String?   // réflexions avant l'entrée
+  postTradeNotes String?   // analyse post-trade (qu'est-ce qui s'est passé ?)
+  executionNotes String?   // qualité d'exécution (entry timing, SL placement...)
+  mistakeNotes   String?   // erreurs identifiées
+
+  // --- Flags comportementaux ---
+  isRevengeTraded Boolean  @default(false)
+  isFomo          Boolean  @default(false)
+  isImpulsive     Boolean  @default(false)
+  followedRules   Boolean? // a-t-on respecté les règles du setup ?
+
+  // --- Référence externe ---
+  // ID du trade dans le broker (pour import automatique futur)
+  brokerTradeId  String?
+  brokerName     String?   // "IBKR", "Binance", "OANDA", etc.
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  // --- Contexte ICT/SMC ---
+  ictContext    IctContext?
+
+  // Relations
+  tags          TradeTag[]
+  executions    TradeExecution[]
+  screenshots   Screenshot[]
+  journalEntries JournalEntry[]
+
+  @@index([entryTime])
+  @@index([symbol])
+  @@index([assetClass])
+  @@index([status])
+  @@index([setupId])
+  @@index([sessionId])
+  @@index([direction])
+  @@index([outcome])
+  @@index([reviewStatus])
+  // Index composite pour les analyses par période et actif
+  @@index([assetClass, entryTime])
+  @@index([symbol, entryTime])
+}
+
+// =============================================================================
+// MODEL : TradeExecution
+// Pour les trades avec scaling in / partial exits.
+// Chaque ligne représente une exécution individuelle (achat ou vente partielle).
+// =============================================================================
+model TradeExecution {
+  id          String   @id @default(cuid())
+  tradeId     String
+  trade       Trade    @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  // OPEN = ajout à la position | CLOSE = réduction / fermeture partielle
+  side        String   // "OPEN" | "CLOSE"
+  price       Decimal  @db.Decimal(20, 8)
+  quantity    Decimal  @db.Decimal(20, 8)
+  commission  Decimal? @db.Decimal(12, 4)
+  swap        Decimal? @db.Decimal(12, 4)
+  executedAt  DateTime
+  notes       String?
+
+  @@index([tradeId])
+  @@index([executedAt])
+}
+
+// =============================================================================
+// MODEL : IctContext
+// Contexte ICT/SMC détaillé d'un trade. Relation 1-1 avec Trade.
+// Séparé du Trade pour ne pas surcharger le modèle principal et rester optionnel.
+// =============================================================================
+model IctContext {
+  id       String @id @default(cuid())
+  tradeId  String @unique
+  trade    Trade  @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  // --- Modèle ICT utilisé ---
+  ictModel      IctModel?   // modèle principal déclencheur de l'entrée
+  ictModelNotes String?     // précisions libres sur le modèle (ex: "OB H1 + FVG M15")
+
+  // --- Point d'intérêt (POI) d'entrée ---
+  poi           PoiType?    // type de POI sur lequel l'entrée a été prise
+  poiTimeframe  Timeframe?  // timeframe sur lequel le POI a été identifié
+  poiNotes      String?     // description libre du POI (ex: "OB du 18 mars, mitigation propre")
+
+  // --- Session & timing ICT ---
+  marketSession MarketSession? // session dans laquelle le trade a été exécuté
+
+  // --- Biais directionnel ---
+  biasHTF       MarketBias?   // biais sur le HTF (Weekly/Daily)
+  biasMTF       MarketBias?   // biais sur le MTF (H4/H1)
+  biasLTF       MarketBias?   // biais sur le LTF (M15/M5)
+
+  // --- Structure de marché ---
+  structureHTF  MarketStructure? // structure HTF au moment du trade
+  structureLTF  MarketStructure? // structure LTF au moment de l'entrée
+  // Un BOS ou CHoCH a-t-il été observé pour valider l'entrée ?
+  hasChoch      Boolean @default(false) // Change of Character confirmé
+  hasBos        Boolean @default(false) // Break of Structure confirmé
+
+  // --- Liquidité ---
+  liquiditySwept    LiquidityType? // type de liquidité sweepée avant l'entrée
+  liquidityTargeted LiquidityType? // type de liquidité visée en cible (TP)
+  // Description des niveaux de liquidité (ex: "Equal highs du 15 mars sweepés")
+  liquidityNotes    String?
+
+  // --- Confluences ICT (booléens pour filtrage rapide) ---
+  // Ces booléens permettent de filtrer "tous mes trades avec FVG + OB confluents"
+  hasFvg         Boolean @default(false) // Fair Value Gap présent
+  hasOrderBlock  Boolean @default(false) // Order Block présent
+  hasBreakerBlock Boolean @default(false) // Breaker Block présent
+  hasInversion   Boolean @default(false) // FVG ou OB inversé
+  hasImbalance   Boolean @default(false) // Imbalance générale
+  isOte          Boolean @default(false) // Entrée dans la zone OTE (62-79%)
+  isPremium      Boolean @default(false) // Entrée en zone premium
+  isDiscount     Boolean @default(false) // Entrée en zone discount
+  isAtEquilibrium Boolean @default(false) // Entrée à l'équilibre (50%)
+
+  // --- Niveaux clés ICT utilisés ---
+  usedWeeklyOpen  Boolean @default(false)
+  usedDailyOpen   Boolean @default(false)
+  usedMidnightOpen Boolean @default(false)
+  usedAsiaHigh    Boolean @default(false)
+  usedAsiaLow     Boolean @default(false)
+  usedPdh         Boolean @default(false) // Previous Day High
+  usedPdl         Boolean @default(false) // Previous Day Low
+
+  // --- Qualité d'exécution ICT ---
+  // A-t-on attendu la kill zone ? A-t-on eu une confirmation sur LTF ?
+  waitedKillZone     Boolean @default(false)
+  hadLtfConfirmation Boolean @default(false) // ex: M1/M5 structure shift
+  entryType          String? // "limit", "market", "stop limit"
+
+  // --- Analyse libre ---
+  confluenceNotes String? // description narrative des confluences observées
+  mistakeNotes    String? // erreurs ICT spécifiques (ex: "entré sans attendre le sweep")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ictModel])
+  @@index([poi])
+  @@index([marketSession])
+  @@index([biasHTF])
+}
+
+// =============================================================================
+// MODEL : Screenshot
+// Images attachées aux trades ou aux sessions.
+// Stockées via URL (Vercel Blob, Cloudinary, S3, etc.)
+// =============================================================================
+model Screenshot {
+  id          String   @id @default(cuid())
+  // Un screenshot peut être lié à un trade OU à une session
+  tradeId     String?
+  trade       Trade?   @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  sessionId   String?
+  session     TradingSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  url         String   // URL publique du fichier (Vercel Blob, etc.)
+  storageKey  String?  // clé de stockage interne (pour la suppression)
+  filename    String?  // nom du fichier original
+  mimeType    String?  // "image/png", "image/jpeg", "image/webp"
+  sizeBytes   Int?     // taille en octets
+  width       Int?     // largeur en pixels
+  height      Int?     // hauteur en pixels
+
+  // Contexte du screenshot
+  timeframe   Timeframe? // timeframe affiché sur le chart
+  chartType   String?    // "entry", "exit", "overview", "setup", "analysis"
+  caption     String?    // légende / description
+
+  takenAt     DateTime?  // timestamp réel du screenshot (peut différer du createdAt)
+  createdAt   DateTime   @default(now())
+
+  @@index([tradeId])
+  @@index([sessionId])
+}
+
+// =============================================================================
+// MODEL : EquitySnapshot
+// Courbe d'equity du compte. Snapshots périodiques.
+// Permet de construire l'equity curve et calculer les statistiques globales.
+// =============================================================================
+model EquitySnapshot {
+  id              String              @id @default(cuid())
+  snapshotType    EquitySnapshotType  @default(DAILY)
+  date            DateTime            @db.Date
+  // Valeur du compte à cette date
+  equity          Decimal             @db.Decimal(18, 4)
+  // Dépôts et retraits cumulés (pour calculer le vrai PnL)
+  totalDeposits   Decimal?            @db.Decimal(18, 4)
+  totalWithdrawals Decimal?           @db.Decimal(18, 4)
+  // Capital alloué au trading (peut différer de l'equity totale)
+  tradingCapital  Decimal?            @db.Decimal(18, 4)
+  currency        String              @default("USD")
+
+  // Métriques calculées sur la période (dénormalisées)
+  drawdown        Decimal?            @db.Decimal(8, 4) // drawdown en % depuis le dernier ATH
+  drawdownAmount  Decimal?            @db.Decimal(15, 4) // drawdown en valeur absolue
+  peakEquity      Decimal?            @db.Decimal(18, 4) // ATH du compte jusqu'à cette date
+
+  // Statistiques de la période (jour/semaine/mois)
+  periodPnl       Decimal?            @db.Decimal(15, 4)
+  periodTrades    Int?
+  periodWins      Int?
+  periodLosses    Int?
+
+  notes           String?
+  createdAt       DateTime            @default(now())
+
+  @@unique([date, snapshotType])
+  @@index([date])
+  @@index([snapshotType])
+}
+
+// =============================================================================
+// MODEL : JournalEntry
+// Entrées libres dans le journal : réflexions, leçons, plans, règles...
+// Découplées des trades/sessions pour les pensées transversales.
+// =============================================================================
+model JournalEntry {
+  id          String           @id @default(cuid())
+  type        JournalEntryType @default(FREE)
+  title       String?
+  content     String           // texte libre, Markdown supporté côté UI
+
+  // Une entrée peut être liée à un trade, une session, ou être autonome
+  tradeId     String?
+  trade       Trade?           @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+  sessionId   String?
+  session     TradingSession?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  // Mood au moment de l'écriture
+  mood        MoodLevel?
+  // Importance perçue (1 = anecdotique, 5 = fondamental)
+  importance  Int?             @default(3)
+  isPinned    Boolean          @default(false) // épingler une leçon importante
+
+  entryDate   DateTime         @default(now()) @db.Date
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([type])
+  @@index([entryDate])
+  @@index([tradeId])
+  @@index([sessionId])
+  @@index([isPinned])
+}

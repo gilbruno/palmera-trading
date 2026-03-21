@@ -1,0 +1,52 @@
+"use server";
+
+import { redirect } from "next/navigation";
+import { prisma } from "@/lib/prisma";
+
+/* ─── Validation helpers ───────────────────────────────────────────────── */
+function getString(formData: FormData, key: string): string {
+  const val = formData.get(key);
+  return typeof val === "string" ? val.trim() : "";
+}
+
+function getOptionalString(formData: FormData, key: string): string | null {
+  const val = getString(formData, key);
+  return val.length > 0 ? val : null;
+}
+
+/* ─── createSetup ──────────────────────────────────────────────────────── */
+export async function createSetup(formData: FormData): Promise<void> {
+  const name = getString(formData, "name");
+  const description = getOptionalString(formData, "description");
+  const entryRules = getOptionalString(formData, "entryRules");
+  const exitRules = getOptionalString(formData, "exitRules");
+  const riskRules = getOptionalString(formData, "riskRules");
+  const notes = getOptionalString(formData, "notes");
+  const isActive = formData.get("isActive") === "on";
+
+  // ── Validation ──────────────────────────────────────────────────────────
+  if (name.length === 0) {
+    throw new Error("Setup name is required.");
+  }
+  if (name.length > 100) {
+    throw new Error("Setup name must be 100 characters or fewer.");
+  }
+  if (description && description.length > 500) {
+    throw new Error("Description must be 500 characters or fewer.");
+  }
+
+  // ── Persist ─────────────────────────────────────────────────────────────
+  await prisma.setup.create({
+    data: {
+      name,
+      description,
+      entryRules,
+      exitRules,
+      riskRules,
+      notes,
+      isActive,
+    },
+  });
+
+  redirect("/setups");
+}
