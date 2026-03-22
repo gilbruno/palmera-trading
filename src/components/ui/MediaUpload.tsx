@@ -84,7 +84,7 @@ function SavedThumbnail({ media, onDeleteType, onDelete }: ThumbnailProps) {
     try {
       const res = await fetch(`/api/upload?mediaId=${media.id}&type=${onDeleteType}`, { method: "DELETE" });
       if (!res.ok && res.status !== 204) throw new Error("Delete failed");
-      onDelete(media.id);
+      onDelete(media.id!);
     } catch {
       // keep dialog open so user can retry
     } finally {

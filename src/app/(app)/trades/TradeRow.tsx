@@ -222,9 +222,9 @@ export function TradeRow({ trade, setups }: { trade: TradeRowData; setups: Setup
         </div>
 
         {/* Screenshot link */}
-        {trade.screenshotUrl && (
+        {trade.media?.[0]?.url && (
           <a
-            href={trade.screenshotUrl}
+            href={trade.media[0].url}
             target="_blank"
             rel="noopener noreferrer"
             className="hidden xl:flex shrink-0 items-center gap-1 text-xs hover:underline"
