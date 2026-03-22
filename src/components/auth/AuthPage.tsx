@@ -299,7 +299,19 @@ export function AuthPage() {
               }}
               priority
             />
-            <p ref={taglineRef} className="auth-tagline" style={{ opacity: 0 }}>
+            <h1
+              style={{
+                fontFamily: "var(--font-cormorant)",
+                fontSize: "clamp(1.5rem, 4vw, 2rem)",
+                fontWeight: 500,
+                letterSpacing: "0.02em",
+                color: "#F5C518",
+                margin: 0,
+              }}
+            >
+              Welcome to Palmera Trading
+            </h1>
+            <p ref={taglineRef} className="auth-tagline">
               Track your trading edge
             </p>
           </div>

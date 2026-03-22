@@ -91,7 +91,7 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
 
       {/* Nav label */}
       <p className="mb-1 px-5 text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
-        Navigation
+        Menu
       </p>
 
       {/* Nav items */}
@@ -250,7 +250,7 @@ function MobileDrawer() {
         ref={drawerRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Navigation"
+        aria-label="Menu"
         className={[
           "fixed inset-y-0 left-0 z-50 w-60 transition-transform duration-200 ease-out",
           open ? "translate-x-0" : "-translate-x-full",
