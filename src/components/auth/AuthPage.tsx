@@ -576,7 +576,7 @@ export function AuthPage() {
             className="mt-6 text-center text-[11px]"
             style={{ opacity: 0, color: "var(--text-muted)" }}
           >
-            MyJournal — Palmera Trading
+            © {new Date().getFullYear()} Palmera Trading. All rights reserved.
           </p>
         </div>
       </div>
