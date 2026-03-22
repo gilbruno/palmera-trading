@@ -9,8 +9,8 @@ export function ActiveToggle({ defaultChecked = true }: { defaultChecked?: boole
     <div
       className="flex cursor-pointer items-center justify-between rounded-xl px-4 py-3 transition-colors duration-150"
       style={{
-        backgroundColor: active ? "rgba(124,58,237,0.08)" : "var(--bg-input)",
-        border: `1px solid ${active ? "rgba(124,58,237,0.35)" : "var(--border)"}`,
+        backgroundColor: active ? "rgba(255,214,0,0.08)" : "var(--bg-input)",
+        border: `1px solid ${active ? "rgba(255,214,0,0.35)" : "var(--border)"}`,
       }}
       onClick={() => setActive((v) => !v)}
     >

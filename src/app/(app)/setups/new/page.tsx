@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { ArrowLeft, BookOpen } from "lucide-react";
-import { createSetup } from "@/app/setups/actions";
+import { createSetup } from "@/app/(app)/setups/actions";
 import { ActiveToggle } from "@/components/ui/ActiveToggle";
+import { FormActions } from "@/components/ui/FormActions";
 
 /* ─── Field primitives ─────────────────────────────────────────────────── */
 function Label({
@@ -127,14 +128,14 @@ export default function NewSetupPage() {
         style={{ color: "var(--text-secondary)", "--tw-ring-color": "var(--accent-purple)" } as React.CSSProperties}
       >
         <ArrowLeft size={13} />
-        Back to Playbook
+        Back to Setups
       </Link>
 
       {/* Page header */}
       <div className="mb-8 flex items-center gap-3">
         <div
           className="flex h-10 w-10 items-center justify-center rounded-2xl"
-          style={{ backgroundColor: "rgba(124,58,237,0.2)" }}
+          style={{ backgroundColor: "rgba(255,214,0,0.2)" }}
         >
           <BookOpen size={18} style={{ color: "var(--accent-purple-light)" }} />
         </div>
@@ -230,30 +231,7 @@ export default function NewSetupPage() {
         </SectionCard>
 
         {/* ── Actions ── */}
-        <div className="flex items-center justify-end gap-3">
-          <Link
-            href="/setups"
-            className="rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-150 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2"
-            style={{
-              color: "var(--text-secondary)",
-              border: "1px solid var(--border)",
-              "--tw-ring-color": "var(--accent-purple)",
-            } as React.CSSProperties}
-          >
-            Cancel
-          </Link>
-          <button
-            type="submit"
-            className="rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-150 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2"
-            style={{
-              background: "linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-purple-light) 100%)",
-              color: "#fff",
-              "--tw-ring-color": "var(--accent-purple)",
-            } as React.CSSProperties}
-          >
-            Save Setup
-          </button>
-        </div>
+        <FormActions cancelHref="/setups" submitLabel="Save Setup" />
       </form>
     </div>
   );

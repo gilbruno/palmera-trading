@@ -1,7 +1,18 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+
+/* ─── Get current authenticated user ──────────────────────────────────── */
+async function requireUserId(): Promise<string> {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+  if (!session?.user?.id) redirect("/");
+  return session.user.id;
+}
 
 /* ─── Validation helpers ───────────────────────────────────────────────── */
 function getString(formData: FormData, key: string): string {
@@ -16,6 +27,8 @@ function getOptionalString(formData: FormData, key: string): string | null {
 
 /* ─── createSetup ──────────────────────────────────────────────────────── */
 export async function createSetup(formData: FormData): Promise<void> {
+  const userId = await requireUserId();
+
   const name = getString(formData, "name");
   const description = getOptionalString(formData, "description");
   const entryRules = getOptionalString(formData, "entryRules");
@@ -38,6 +51,7 @@ export async function createSetup(formData: FormData): Promise<void> {
   // ── Persist ─────────────────────────────────────────────────────────────
   await prisma.setup.create({
     data: {
+      userId,
       name,
       description,
       entryRules,

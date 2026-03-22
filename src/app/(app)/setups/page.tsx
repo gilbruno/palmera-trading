@@ -1,7 +1,11 @@
 import Link from "next/link";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
 import type { SetupModel as Setup } from "@/generated/prisma/models/Setup";
 import { Plus, BookOpen, ChevronRight } from "lucide-react";
+import { NewSetupButton } from "@/components/ui/NewSetupButton";
 
 /* ─── Helpers ──────────────────────────────────────────────────────────── */
 function fmt(value: string | null | undefined, decimals = 2): string {
@@ -44,7 +48,7 @@ function EmptyState() {
     <div className="flex flex-col items-center justify-center py-24 text-center">
       <div
         className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl"
-        style={{ backgroundColor: "rgba(124,58,237,0.12)", border: "1px solid rgba(124,58,237,0.25)" }}
+        style={{ backgroundColor: "rgba(255,214,0,0.12)", border: "1px solid rgba(255,214,0,0.25)" }}
       >
         <BookOpen size={26} style={{ color: "var(--accent-purple-light)" }} />
       </div>
@@ -54,18 +58,7 @@ function EmptyState() {
       <p className="mb-8 max-w-xs text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
         Create your first trading setup to start building your playbook.
       </p>
-      <Link
-        href="/setups/new"
-        className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-150 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2"
-        style={{
-          backgroundColor: "var(--accent-purple)",
-          color: "#fff",
-          "--tw-ring-color": "var(--accent-purple)",
-        } as React.CSSProperties}
-      >
-        <Plus size={15} />
-        New Setup
-      </Link>
+      <NewSetupButton />
     </div>
   );
 }
@@ -83,7 +76,7 @@ function SetupRow({ setup }: { setup: Setup }) {
       {/* Icon dot */}
       <div
         className="hidden sm:flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
-        style={{ backgroundColor: "rgba(124,58,237,0.12)" }}
+        style={{ backgroundColor: "rgba(255,214,0,0.12)" }}
       >
         <BookOpen size={14} style={{ color: "var(--accent-purple-light)" }} />
       </div>
@@ -150,7 +143,11 @@ function SetupRow({ setup }: { setup: Setup }) {
 
 /* ─── Page ─────────────────────────────────────────────────────────────── */
 export default async function SetupsPage() {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user?.id) redirect("/");
+
   const setups = await prisma.setup.findMany({
+    where: { userId: session.user.id },
     orderBy: { createdAt: "desc" },
   });
 
@@ -161,13 +158,13 @@ export default async function SetupsPage() {
         <div className="flex items-center gap-3">
           <div
             className="flex h-10 w-10 items-center justify-center rounded-2xl"
-            style={{ backgroundColor: "rgba(124,58,237,0.2)" }}
+            style={{ backgroundColor: "rgba(255,214,0,0.2)" }}
           >
             <BookOpen size={18} style={{ color: "var(--accent-purple-light)" }} />
           </div>
           <div>
             <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
-              Playbook
+              Setups
             </h1>
             <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
               {setups.length > 0
@@ -176,18 +173,7 @@ export default async function SetupsPage() {
             </p>
           </div>
         </div>
-        <Link
-          href="/setups/new"
-          className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-150 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2"
-          style={{
-            backgroundColor: "var(--accent-purple)",
-            color: "#fff",
-            "--tw-ring-color": "var(--accent-purple)",
-          } as React.CSSProperties}
-        >
-          <Plus size={15} />
-          New Setup
-        </Link>
+        <NewSetupButton />
       </div>
 
       {/* Content */}

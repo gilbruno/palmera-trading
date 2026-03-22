@@ -1,9 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { BookOpen, TrendingUp, BarChart2, Calculator, Home, Menu, X } from "lucide-react";
+import { BookOpen, TrendingUp, BookMarked, Calculator, FlaskConical, Menu, X } from "lucide-react";
+import { LogoutButton } from "@/components/ui/LogoutButton";
 
 interface NavItem {
   label: string;
@@ -17,45 +19,36 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   {
-    label: "Home",
-    href: "/",
-    icon: <Home size={16} strokeWidth={1.75} />,
-    activeColor: "#d1d5db",
-    activeBg: "rgba(255,255,255,0.07)",
-    activeIconColor: "#d1d5db",
-    exact: true,
-  },
-  {
-    label: "Playbook",
+    label: "Setups",
     href: "/setups",
     icon: <BookOpen size={16} strokeWidth={1.75} />,
-    activeColor: "var(--accent-purple-light)",
-    activeBg: "rgba(124,58,237,0.15)",
-    activeIconColor: "var(--accent-purple-light)",
+    activeColor: "var(--accent-primary-light)",
+    activeBg: "rgba(255,214,0,0.12)",
+    activeIconColor: "var(--accent-primary-light)",
   },
   {
     label: "Trades",
     href: "/trades",
     icon: <TrendingUp size={16} strokeWidth={1.75} />,
-    activeColor: "#d1d5db",
-    activeBg: "rgba(255,255,255,0.07)",
-    activeIconColor: "#d1d5db",
+    activeColor: "var(--accent-tertiary-light)",
+    activeBg: "rgba(0,200,150,0.12)",
+    activeIconColor: "var(--accent-tertiary-light)",
   },
   {
-    label: "Journal",
-    href: "/journal",
-    icon: <BarChart2 size={16} strokeWidth={1.75} />,
-    activeColor: "var(--accent-green-light)",
-    activeBg: "rgba(16,185,129,0.15)",
-    activeIconColor: "var(--accent-green-light)",
+    label: "Backtest",
+    href: "/backtest",
+    icon: <FlaskConical size={16} strokeWidth={1.75} />,
+    activeColor: "#a5b4fc",
+    activeBg: "rgba(99,102,241,0.12)",
+    activeIconColor: "#a5b4fc",
   },
   {
     label: "Position Size",
     href: "/position-size",
     icon: <Calculator size={16} strokeWidth={1.75} />,
-    activeColor: "#fb923c",
-    activeBg: "rgba(251,146,60,0.15)",
-    activeIconColor: "#fb923c",
+    activeColor: "var(--accent-secondary)",
+    activeBg: "rgba(255,140,0,0.10)",
+    activeIconColor: "var(--accent-secondary)",
   },
 ];
 
@@ -66,24 +59,31 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
   return (
     <div className="flex h-full flex-col">
       {/* Logo */}
-      <div className="flex h-16 items-center gap-3 px-5">
-        <div
-          className="flex h-8 w-8 items-center justify-center rounded-xl"
-          style={{ backgroundColor: "var(--accent-purple)" }}
-        >
-          <TrendingUp size={15} strokeWidth={2} color="#fff" />
-        </div>
-        <div>
+      <div className="flex h-20 items-center px-5">
+        <Link href="/dashboard" className="flex items-center gap-3 focus-visible:outline-none focus-visible:ring-2 rounded-lg" style={{ "--tw-ring-color": "var(--accent-primary)" } as React.CSSProperties}>
+          <Image
+            src="/images/palmera_trading.png"
+            alt="Palmera Trading"
+            width={110}
+            height={110}
+            className="object-contain shrink-0"
+            style={{ height: "auto" }}
+            priority
+          />
           <span
-            className="block text-sm font-bold tracking-wide"
-            style={{ color: "var(--text-primary)" }}
+            className="leading-tight"
+            style={{
+              fontFamily: "var(--font-cormorant)",
+              fontSize: "1.25rem",
+              fontWeight: 500,
+              letterSpacing: "0.02em",
+              color: "#F5C518",
+            }}
           >
-            MyJournal
+            Palmera<br />
+            <span style={{ fontStyle: "italic", fontWeight: 300, fontSize: "1.05rem" }}>Trading</span>
           </span>
-          <span className="block text-[10px] leading-none" style={{ color: "var(--text-muted)" }}>
-            Trading Journal
-          </span>
-        </div>
+        </Link>
       </div>
 
       {/* Divider */}
@@ -121,7 +121,7 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
                         } as React.CSSProperties
                       : {
                           color: "var(--text-secondary)",
-                          "--tw-ring-color": "var(--accent-purple)",
+                          "--tw-ring-color": "var(--accent-primary)",
                         } as React.CSSProperties
                   }
                 >
@@ -153,8 +153,9 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
 
       {/* Footer */}
       <div className="mx-4 mt-2 h-px" style={{ backgroundColor: "var(--border)" }} />
-      <div className="px-5 py-4">
-        <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+      <div className="px-3 py-3">
+        <LogoutButton />
+        <p className="mt-2 px-3 text-[11px]" style={{ color: "var(--text-muted)" }}>
           v0.1.0
         </p>
       </div>
@@ -207,21 +208,32 @@ function MobileDrawer() {
           onClick={() => setOpen(true)}
           aria-label="Open navigation"
           className="rounded-lg p-1.5 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2"
-          style={{ color: "var(--text-secondary)", "--tw-ring-color": "var(--accent-purple)" } as React.CSSProperties}
+          style={{ color: "var(--text-secondary)", "--tw-ring-color": "var(--accent-primary)" } as React.CSSProperties}
         >
           <Menu size={18} />
         </button>
-        <div className="flex items-center gap-2">
-          <div
-            className="flex h-6 w-6 items-center justify-center rounded-lg"
-            style={{ backgroundColor: "var(--accent-purple)" }}
+        <Link href="/dashboard" className="flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 rounded-lg" style={{ "--tw-ring-color": "var(--accent-primary)" } as React.CSSProperties}>
+          <Image
+            src="/images/palmera_trading.png"
+            alt="Palmera Trading"
+            width={80}
+            height={80}
+            className="object-contain shrink-0"
+            style={{ height: "auto" }}
+            priority
+          />
+          <span
+            style={{
+              fontFamily: "var(--font-cormorant)",
+              fontSize: "1.15rem",
+              fontWeight: 500,
+              letterSpacing: "0.02em",
+              color: "#F5C518",
+            }}
           >
-            <TrendingUp size={12} strokeWidth={2} color="#fff" />
-          </div>
-          <span className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
-            MyJournal
+            Palmera <span style={{ fontStyle: "italic", fontWeight: 300 }}>Trading</span>
           </span>
-        </div>
+        </Link>
       </div>
 
       {/* Backdrop */}
@@ -253,7 +265,7 @@ function MobileDrawer() {
           onClick={() => setOpen(false)}
           aria-label="Close navigation"
           className="absolute right-3 top-3 rounded-lg p-1.5 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2"
-          style={{ color: "var(--text-secondary)", "--tw-ring-color": "var(--accent-purple)" } as React.CSSProperties}
+          style={{ color: "var(--text-secondary)", "--tw-ring-color": "var(--accent-primary)" } as React.CSSProperties}
         >
           <X size={16} />
         </button>

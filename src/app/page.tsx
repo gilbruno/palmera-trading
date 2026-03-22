@@ -1,5 +1,10 @@
-import { HomeHero } from "@/components/home/HomeHero";
+import { Suspense } from "react";
+import { AuthPage } from "@/components/auth/AuthPage";
 
-export default function Home() {
-  return <HomeHero />;
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <AuthPage />
+    </Suspense>
+  );
 }

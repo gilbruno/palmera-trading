@@ -183,7 +183,7 @@ function InputField({
             paddingRight: suffix ? "2.5rem" : "0.75rem",
           }}
           onFocus={(e) =>
-            (e.currentTarget.style.borderColor = "rgba(251,146,60,0.6)")
+            (e.currentTarget.style.borderColor = "rgba(255,214,0,0.6)")
           }
           onBlur={(e) =>
             (e.currentTarget.style.borderColor = "var(--border)")
@@ -270,7 +270,7 @@ export default function PositionSizePage() {
       : result.rrRatio >= 2
       ? "var(--accent-green-light)"
       : result.rrRatio >= 1
-      ? "#fbbf24"
+      ? "var(--accent-primary-light)"
       : "#ef4444";
 
   return (
@@ -280,9 +280,9 @@ export default function PositionSizePage() {
         <div className="mb-2 flex items-center gap-3">
           <div
             className="flex h-9 w-9 items-center justify-center rounded-xl"
-            style={{ backgroundColor: "rgba(251,146,60,0.2)" }}
+            style={{ backgroundColor: "rgba(255,214,0,0.2)" }}
           >
-            <Calculator size={18} style={{ color: "#fb923c" }} />
+            <Calculator size={18} style={{ color: "var(--accent-primary)" }} />
           </div>
           <h1 className="text-2xl font-bold" style={{ color: "var(--text-primary)" }}>
             Position Size Calculator
@@ -387,13 +387,13 @@ export default function PositionSizePage() {
                     style={{
                       backgroundColor:
                         inputs.instrumentType === t
-                          ? "rgba(251,146,60,0.2)"
+                          ? "rgba(255,214,0,0.2)"
                           : "var(--bg-input)",
                       color:
                         inputs.instrumentType === t
-                          ? "#fb923c"
+                          ? "var(--accent-primary)"
                           : "var(--text-secondary)",
-                      border: `1px solid ${inputs.instrumentType === t ? "rgba(251,146,60,0.4)" : "var(--border)"}`,
+                      border: `1px solid ${inputs.instrumentType === t ? "rgba(255,214,0,0.4)" : "var(--border)"}`,
                     }}
                   >
                     {t}
@@ -418,13 +418,13 @@ export default function PositionSizePage() {
                       style={{
                         backgroundColor:
                           inputs.forexLotType === lt
-                            ? "rgba(251,146,60,0.15)"
+                            ? "rgba(255,214,0,0.15)"
                             : "var(--bg-input)",
                         color:
                           inputs.forexLotType === lt
-                            ? "#fb923c"
+                            ? "var(--accent-primary)"
                             : "var(--text-secondary)",
-                        border: `1px solid ${inputs.forexLotType === lt ? "rgba(251,146,60,0.35)" : "var(--border)"}`,
+                        border: `1px solid ${inputs.forexLotType === lt ? "rgba(255,214,0,0.35)" : "var(--border)"}`,
                       }}
                     >
                       <span className="font-semibold capitalize">{lt}</span>
@@ -488,26 +488,26 @@ export default function PositionSizePage() {
           <div
             className="rounded-2xl p-6"
             style={{
-              background: "linear-gradient(135deg, rgba(251,146,60,0.15) 0%, rgba(251,146,60,0.05) 100%)",
-              border: "1px solid rgba(251,146,60,0.3)",
+              background: "linear-gradient(135deg, rgba(255,214,0,0.15) 0%, rgba(255,214,0,0.05) 100%)",
+              border: "1px solid rgba(255,214,0,0.3)",
             }}
           >
             <div className="flex items-center gap-2 mb-3">
-              <Calculator size={14} style={{ color: "#fb923c" }} />
-              <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "#fb923c" }}>
+              <Calculator size={14} style={{ color: "var(--accent-primary)" }} />
+              <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--accent-primary)" }}>
                 Position Size
               </span>
             </div>
             {result ? (
               <>
-                <p className="text-4xl font-bold tabular-nums" style={{ color: "#fb923c" }}>
+                <p className="text-4xl font-bold tabular-nums" style={{ color: "var(--accent-primary)" }}>
                   {inputs.instrumentType === "forex"
                     ? fmtCompact(result.positionSize)
                     : inputs.instrumentType === "stocks"
                     ? fmt(result.positionSize, 0)
                     : fmtCompact(result.positionSize)}
                 </p>
-                <p className="mt-1 text-sm font-medium" style={{ color: "rgba(251,146,60,0.7)" }}>
+                <p className="mt-1 text-sm font-medium" style={{ color: "rgba(255,214,0,0.7)" }}>
                   {result.positionLabel}
                 </p>
               </>
@@ -523,7 +523,7 @@ export default function PositionSizePage() {
             label="Dollar at Risk"
             value={result ? `$${fmt(result.dollarRisk)}` : "—"}
             sub={result ? `${inputs.riskPercent}% of $${fmt(parseNum(inputs.accountSize), 0)}` : undefined}
-            accent="#f59e0b"
+            accent="var(--accent-primary)"
             icon={<DollarSign size={14} />}
           />
 
@@ -532,7 +532,7 @@ export default function PositionSizePage() {
             label="Stop Distance"
             value={result ? fmtCompact(result.stopDist) : "—"}
             sub={result ? `${fmt(result.stopDistPct, 3)}% from entry` : undefined}
-            accent="#6366f1"
+            accent="var(--accent-secondary)"
             icon={<Shield size={14} />}
           />
 

@@ -3,26 +3,34 @@
 /* ─── Design tokens ───────────────────────────────────────────────────── */
 :root {
   /* Backgrounds */
-  --bg-base:    #0a0a0a;
-  --bg-sidebar: #111111;
-  --bg-card:    #1a1a1a;
-  --bg-input:   #111111;
+  --bg-base:    #0d0c08;
+  --bg-sidebar: #110f0a;
+  --bg-card:    #1a1710;
+  --bg-input:   #110f0a;
 
   /* Borders */
-  --border:     #2a2a2a;
+  --border:     #2e2a1a;
 
   /* Text */
-  --text-primary:   #ffffff;
-  --text-secondary: #a0a0a0;
-  --text-muted:     #555555;
+  --text-primary:   #fdf8e8;
+  --text-secondary: #a89d7a;
+  --text-muted:     #5a5238;
 
-  /* Accents */
-  --accent-purple: #7c3aed;
-  --accent-purple-light: #8b5cf6;
-  --accent-green:  #10b981;
-  --accent-green-light: #34d399;
-  --accent-blue:   #6366f1;
-  --accent-red:    #ef4444;
+  /* Accents — couleur primaire: jaune solaire, secondaire: coucher de soleil, tertiaire: vert tropical */
+  --accent-primary:        #FFD600;
+  --accent-primary-light:  #FFE033;
+  --accent-secondary:      #FF8C00;
+  --accent-secondary-light:#FFA333;
+  --accent-tertiary:       #00C896;
+  --accent-tertiary-light: #00E6AC;
+
+  /* Semantic aliases (anciens noms conservés pour compatibilité) */
+  --accent-purple:       var(--accent-primary);
+  --accent-purple-light: var(--accent-primary-light);
+  --accent-green:        var(--accent-tertiary);
+  --accent-green-light:  var(--accent-tertiary-light);
+  --accent-blue:         var(--accent-secondary);
+  --accent-red:          #ef4444;
 
   /* Legacy compat */
   --background: var(--bg-base);
@@ -30,20 +38,27 @@
 }
 
 @theme inline {
-  --color-background:         var(--bg-base);
-  --color-foreground:         var(--text-primary);
-  --color-sidebar:            var(--bg-sidebar);
-  --color-card:               var(--bg-card);
-  --color-border:             var(--border);
-  --color-text-primary:       var(--text-primary);
-  --color-text-secondary:     var(--text-secondary);
-  --color-text-muted:         var(--text-muted);
-  --color-accent-purple:      var(--accent-purple);
-  --color-accent-purple-light: var(--accent-purple-light);
-  --color-accent-green:       var(--accent-green);
-  --color-accent-green-light: var(--accent-green-light);
-  --color-accent-blue:        var(--accent-blue);
-  --color-accent-red:         var(--accent-red);
+  --color-background:          var(--bg-base);
+  --color-foreground:          var(--text-primary);
+  --color-sidebar:             var(--bg-sidebar);
+  --color-card:                var(--bg-card);
+  --color-border:              var(--border);
+  --color-text-primary:        var(--text-primary);
+  --color-text-secondary:      var(--text-secondary);
+  --color-text-muted:          var(--text-muted);
+  --color-accent-primary:      var(--accent-primary);
+  --color-accent-primary-light: var(--accent-primary-light);
+  --color-accent-secondary:    var(--accent-secondary);
+  --color-accent-secondary-light: var(--accent-secondary-light);
+  --color-accent-tertiary:     var(--accent-tertiary);
+  --color-accent-tertiary-light: var(--accent-tertiary-light);
+  /* Legacy mappings */
+  --color-accent-purple:       var(--accent-primary);
+  --color-accent-purple-light: var(--accent-primary-light);
+  --color-accent-green:        var(--accent-tertiary);
+  --color-accent-green-light:  var(--accent-tertiary-light);
+  --color-accent-blue:         var(--accent-secondary);
+  --color-accent-red:          var(--accent-red);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -69,13 +84,11 @@ body {
 }
 
 /* ─── Toggle switch ───────────────────────────────────────────────────── */
-/* The checkbox is nested inside .toggle-track label.
-   :has(:checked) drives both track colour and thumb position — no JS. */
 .toggle-track:has(:checked) {
-  background-color: var(--accent-purple);
+  background-color: var(--accent-primary);
 }
 .toggle-track:has(:checked) .toggle-thumb {
-  transform: translateX(1rem); /* 16 px — shifts thumb to the right end */
+  transform: translateX(1rem);
 }
 
 /* ─── Scrollbar ───────────────────────────────────────────────────────── */
