@@ -20,7 +20,7 @@ const cormorant = Cormorant_Garamond({
 });
 
 export const metadata: Metadata = {
-  title: "MyJournal — Trading Journal",
+  title: "Palmera Trading - Track your edge to get closer to the palm trees",
   description: "Track, analyse and improve your trading performance.",
   icons: {
     icon: [

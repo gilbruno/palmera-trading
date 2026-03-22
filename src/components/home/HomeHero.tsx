@@ -46,7 +46,7 @@ const cards = [
 ];
 
 /* Split "MyJournal" into individual <span> elements via React — no innerHTML */
-const TITLE = "MyJournal";
+const TITLE = "Palmera Trading";
 const titleChars = TITLE.split("");
 
 const TAGLINE = "Track your trading edge";
