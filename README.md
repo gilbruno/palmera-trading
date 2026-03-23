@@ -1,36 +1,90 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Palmera Trading — Journal de trading
 
-## Getting Started
+Application web privée de journalisation et d'analyse pour traders actifs. Construite avec Next.js 16, React 19, Prisma et PostgreSQL.
 
-First, run the development server:
+## Fonctionnalités
+
+- **Dashboard** — vue d'ensemble personnalisée avec calendrier économique hebdomadaire
+- **Trades** — saisie, filtrage et suivi de tous vos trades (outcome, R-multiple, setup associé)
+- **Setups** — bibliothèque de setups avec statistiques calculées (Win Rate, Avg R) et statut actif/inactif
+- **Backtest** — simulation de setups sur données historiques avec métriques complètes (winrate, profit factor, expectancy, total R)
+- **Position Size Calculator** — calcul de taille de position en temps réel pour Forex, indices, actions et crypto, avec validation de direction et ratio R:R
+
+## Stack technique
+
+| Couche | Technologie |
+|---|---|
+| Framework | Next.js 16 (App Router, Server Components, Server Actions) |
+| UI | React 19, TailwindCSS 4, Lucide React |
+| Auth | Better Auth |
+| ORM | Prisma 7 + PostgreSQL (adapter `pg`) |
+| Stockage | AWS S3 |
+| Package manager | pnpm 10 |
+
+## Prérequis
+
+- Node.js >= 20
+- pnpm >= 10
+- PostgreSQL
+
+## Installation
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Créez un fichier `.env` à la racine en vous basant sur `.env.example` :
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/palmera"
+BETTER_AUTH_SECRET="..."
+AWS_BUCKET_NAME="..."
+AWS_REGION="..."
+AWS_ACCESS_KEY_ID="..."
+AWS_SECRET_ACCESS_KEY="..."
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Appliquez les migrations et générez le client Prisma :
 
-## Learn More
+```bash
+pnpm prisma migrate deploy
+pnpm prisma generate
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Développement
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+pnpm dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+L'application est accessible sur [http://localhost:3000](http://localhost:3000).
 
-## Deploy on Vercel
+## Production
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+pnpm build
+pnpm start
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`pnpm build` exécute automatiquement `prisma generate` avant le build Next.js.
+
+## Structure du projet
+
+```
+src/
+  app/
+    (app)/            # Routes protégées (authentification requise)
+      dashboard/      # Page d'accueil
+      trades/         # Journal des trades
+      setups/         # Bibliothèque de setups
+      backtest/       # Backtests
+      position-size/  # Calculateur de taille de position
+    (auth)/           # Pages d'authentification
+  components/         # Composants réutilisables
+  lib/                # Auth, Prisma client, utilitaires
+  generated/          # Client Prisma généré
+```
+
+## Licence
+
+Usage privé — tous droits réservés.
