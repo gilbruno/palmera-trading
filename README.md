@@ -2,6 +2,16 @@
 
 Application web privée de journalisation et d'analyse pour traders actifs. Construite avec Next.js 16, React 19, Prisma et PostgreSQL.
 
+## Screenshots
+
+| Login | Dashboard |
+|---|---|
+| ![Login](public/images/screenshots/login_palmera_trading.png) | ![Dashboard](public/images/screenshots/dashboard_palmera_trading.png) |
+
+| Trades | Backtest |
+|---|---|
+| ![Trades](public/images/screenshots/trades_palmera_trading.png) | ![Backtest](public/images/screenshots/backtest_palmera_trading.png) |
+
 ## Fonctionnalités
 
 - **Dashboard** — vue d'ensemble personnalisée avec calendrier économique hebdomadaire
