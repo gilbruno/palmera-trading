@@ -23,6 +23,7 @@ export function Combobox({ name, options, value, onChange, placeholder = "— Se
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const isHoveringDropdown = useRef(false);
 
   const selected = options.find((o) => o.value === value);
   const isEmpty = !value;
@@ -88,7 +89,7 @@ export function Combobox({ name, options, value, onChange, placeholder = "— Se
     el?.scrollIntoView({ block: "nearest" });
   }, [highlightedIndex, open]);
 
-  // Close on outside click
+  // Close on outside click or scroll
   const handleOutsideClick = useCallback(
     (e: MouseEvent) => {
       if (
@@ -101,14 +102,24 @@ export function Combobox({ name, options, value, onChange, placeholder = "— Se
   );
 
   useEffect(() => {
-    if (open) document.addEventListener("mousedown", handleOutsideClick);
-    return () => document.removeEventListener("mousedown", handleOutsideClick);
+    if (!open) return;
+    function handleScroll() {
+      if (!isHoveringDropdown.current) closeDropdown();
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      window.removeEventListener("scroll", handleScroll, true);
+    };
   }, [open, handleOutsideClick]);
 
   const dropdown =
     open && typeof document !== "undefined"
       ? createPortal(
           <div
+            onMouseEnter={() => { isHoveringDropdown.current = true; }}
+            onMouseLeave={() => { isHoveringDropdown.current = false; }}
             style={{
               ...dropdownStyle,
               backgroundColor: "var(--bg-sidebar)",

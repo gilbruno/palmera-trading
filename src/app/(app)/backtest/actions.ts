@@ -136,16 +136,11 @@ function extractTradeFields(fd: FormData) {
   const exitPrice = getOptionalFloat(fd, "exitPrice");
   const stopLoss = getOptionalFloat(fd, "stopLoss");
 
-  let rMultiple = getOptionalFloat(fd, "rMultiple");
-  if (rMultiple === null && entryPrice && exitPrice && stopLoss) {
-    const risk = Math.abs(entryPrice - stopLoss);
-    if (risk > 0) {
-      const pnl = directionRaw === "LONG"
-        ? exitPrice - entryPrice
-        : entryPrice - exitPrice;
-      rMultiple = pnl / risk;
-    }
-  }
+  // rMultiple déduit de l'outcome (backtest simplifié, pas de slippage)
+  const rMultiple = outcomeRaw === "WIN" ? 1.0
+    : outcomeRaw === "LOSS" ? -1.0
+    : outcomeRaw === "BREAKEVEN" ? 0
+    : null;
 
   const tagsRaw = getOptional(fd, "tags");
   const tags = tagsRaw
@@ -194,6 +189,15 @@ function extractTradeFields(fd: FormData) {
     isRevenge:     getBool(fd, "isRevenge"),
     isImpulsive:   getBool(fd, "isImpulsive"),
     followedRules: getOptionalBool(fd, "followedRules"),
+    // Scénarios alternatifs — WIN → cible atteinte, LOSS → SL touché (-1R)
+    outcome1R:    getEnum(fd, "outcome1R",  ["WIN", "LOSS"]) as TradeOutcome | null,
+    rMultiple1R:  getEnum(fd, "outcome1R",  ["WIN", "LOSS"]) === "WIN" ? 1.0
+                : getEnum(fd, "outcome1R",  ["WIN", "LOSS"]) === "LOSS" ? -1.0
+                : null,
+    outcome15R:   getEnum(fd, "outcome15R", ["WIN", "LOSS"]) as TradeOutcome | null,
+    rMultiple15R: getEnum(fd, "outcome15R", ["WIN", "LOSS"]) === "WIN" ? 1.5
+                : getEnum(fd, "outcome15R", ["WIN", "LOSS"]) === "LOSS" ? -1.0
+                : null,
   };
 }
 

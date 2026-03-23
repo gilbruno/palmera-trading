@@ -8,8 +8,10 @@ import {
 } from "lucide-react";
 import type { Direction, TradeOutcome } from "@/generated/prisma/enums";
 import { deleteBacktestTrade, updateBacktestTrade } from "../actions";
+import { Combobox } from "@/components/ui/Combobox";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { MediaUpload } from "@/components/ui/MediaUpload";
+import { CheckToggle } from "@/components/ui/CheckToggle";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface TradeMedia {
@@ -55,6 +57,11 @@ interface Trade {
   isRevenge: boolean;
   isImpulsive: boolean;
   followedRules: boolean | null;
+  // Scénarios alternatifs
+  outcome1R:    TradeOutcome | null;
+  rMultiple1R:  number | null;
+  outcome15R:   TradeOutcome | null;
+  rMultiple15R: number | null;
 }
 
 /* ─── Shared styles ─────────────────────────────────────────────────────── */
@@ -66,7 +73,6 @@ const iStyle: React.CSSProperties = {
   outline: "none",
 };
 const iCls = "block w-full px-2.5 py-1.5 text-sm transition-all focus:ring-1 focus:ring-[var(--accent-primary)] placeholder:opacity-30";
-const sCls = `${iCls} appearance-none`;
 const lCls = "mb-0.5 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-widest";
 const lStyle: React.CSSProperties = { color: "var(--text-muted)" };
 
@@ -204,6 +210,10 @@ const TIPS: Record<string, string> = {
   isRevenge:       "Trade pris pour 'récupérer' après une perte.",
   isImpulsive:     "Entrée sans attendre la confirmation ou le setup complet.",
   followedRules:   "As-tu respecté toutes les règles de ton playbook pour ce trade ?",
+  outcome1R:       "Résultat réel si tu avais sorti à 1R. Peut être WIN, LOSS ou B/E selon où était le prix au niveau 1R.",
+  rMultiple1R:     "R effectivement réalisé dans le scénario sortie à 1R. Ex: +1.0 si TP touché, -0.8 si SL touché avant.",
+  outcome15R:      "Résultat réel si tu avais sorti à 1.5R.",
+  rMultiple15R:    "R effectivement réalisé dans le scénario sortie à 1.5R.",
 };
 
 /* ─── Helpers ───────────────────────────────────────────────────────────── */
@@ -331,30 +341,14 @@ function Section({ title, children, collapsible = false, defaultOpen = true }: {
   );
 }
 
-/* ─── Select ────────────────────────────────────────────────────────────── */
-function Sel({ name, options, defaultValue }: {
-  name: string;
-  options: { value: string; label: string }[];
-  defaultValue?: string | null;
-}) {
-  return (
-    <select name={name} defaultValue={defaultValue ?? ""} className={sCls} style={iStyle}>
-      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
-  );
-}
-
 /* ─── Checkbox field ────────────────────────────────────────────────────── */
 function CheckField({ name, label, field, defaultChecked }: {
   name: string; label: string; field: string; defaultChecked?: boolean;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2">
-      <input type="checkbox" name={name} value="true" defaultChecked={defaultChecked}
-        className="h-3.5 w-3.5 rounded accent-[var(--accent-primary)]" />
-      <span className="text-sm" style={{ color: "var(--text-secondary)" }}>{label}</span>
+    <CheckToggle name={name} label={label} defaultChecked={defaultChecked}>
       <Tip field={field} />
-    </label>
+    </CheckToggle>
   );
 }
 
@@ -388,15 +382,74 @@ function GradeStars({ grade }: { grade: number | null }) {
   );
 }
 
+/* ─── Alternative scenarios section (shared by Add + Edit forms) ────────── */
+function AlternativeScenariosSection({
+  outcome1R,
+  setOutcome1R,
+  outcome15R,
+  setOutcome15R,
+}: {
+  outcome1R: string;
+  setOutcome1R: (v: string) => void;
+  outcome15R: string;
+  setOutcome15R: (v: string) => void;
+}) {
+  return (
+    <Section title="Sorties alternatives (simulation)" collapsible defaultOpen={false}>
+      <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+        Renseigne le résultat <em>réel</em> si tu avais pris tes profits plus tôt. Le R est calculé automatiquement.
+      </p>
+
+      {/* 1R */}
+      <div>
+        <GL field="outcome1R">Si sorti à 1R</GL>
+        <div className="flex gap-2">
+          {OUTCOMES.map((o) => (
+            <button key={o.value} type="button" onClick={() => setOutcome1R(outcome1R === o.value ? "" : o.value)}
+              className="flex flex-1 items-center justify-center rounded-xl py-1.5 text-sm font-semibold transition-all"
+              style={outcome1R === o.value
+                ? { backgroundColor: "rgba(255,255,255,0.08)", border: `1px solid ${o.color}`, color: o.color }
+                : { backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", color: "var(--text-muted)" }
+              }
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 1.5R */}
+      <div>
+        <GL field="outcome15R">Si sorti à 1.5R</GL>
+        <div className="flex gap-2">
+          {OUTCOMES.map((o) => (
+            <button key={o.value} type="button" onClick={() => setOutcome15R(outcome15R === o.value ? "" : o.value)}
+              className="flex flex-1 items-center justify-center rounded-xl py-1.5 text-sm font-semibold transition-all"
+              style={outcome15R === o.value
+                ? { backgroundColor: "rgba(255,255,255,0.08)", border: `1px solid ${o.color}`, color: o.color }
+                : { backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", color: "var(--text-muted)" }
+              }
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
 /* ─── Edit form (inline) ────────────────────────────────────────────────── */
 function EditForm({
   trade,
   backtestId,
+  instrument,
   onCancel,
   onSaved,
 }: {
   trade: Trade;
   backtestId: string;
+  instrument: string;
   onCancel: () => void;
   onSaved: () => void;
 }) {
@@ -406,6 +459,20 @@ function EditForm({
   const [followedRules, setFollowedRules] = useState<"" | "true" | "false">(
     trade.followedRules === true ? "true" : trade.followedRules === false ? "false" : ""
   );
+  const [outcome1R, setOutcome1R] = useState<string>(trade.outcome1R ?? "");
+  const [outcome15R, setOutcome15R] = useState<string>(trade.outcome15R ?? "");
+  const [selects, setSelects] = useState<Record<string, string>>({
+    marketSession:   trade.marketSession   ?? "",
+    timeframeEntry:  trade.timeframeEntry  ?? "",
+    timeframeTrend:  trade.timeframeTrend  ?? "",
+    liquiditySwept:  trade.liquiditySwept  ?? "",
+    biasHTF:         trade.biasHTF         ?? "",
+    biasMTF:         trade.biasMTF         ?? "",
+    marketStructure: trade.marketStructure ?? "",
+    ictModel:        trade.ictModel        ?? "",
+    poi:             trade.poi             ?? "",
+  });
+  const setSel = (key: string) => (v: string) => setSelects((prev) => ({ ...prev, [key]: v }));
   const [error, setError] = useState<string | null>(null);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -415,6 +482,8 @@ function EditForm({
     fd.set("direction", direction);
     if (outcome) fd.set("outcome", outcome);
     if (followedRules !== "") fd.set("followedRules", followedRules);
+    if (outcome1R) fd.set("outcome1R", outcome1R);
+    if (outcome15R) fd.set("outcome15R", outcome15R);
     startTransition(async () => {
       try {
         await updateBacktestTrade(backtestId, trade.id, fd);
@@ -430,8 +499,16 @@ function EditForm({
       style={{ borderTop: "1px solid var(--border)", backgroundColor: "rgba(255,255,255,0.01)" }}
     >
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--accent-primary)" }}>
-          Editing trade #{trade.tradeNumber}
+        <span className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--accent-primary)" }}>
+            Editing trade #{trade.tradeNumber}
+          </span>
+          <span
+            className="rounded-md px-2 py-0.5 text-xs font-bold tracking-wider"
+            style={{ backgroundColor: "rgba(99,102,241,0.15)", color: "#a5b4fc", border: "1px solid rgba(99,102,241,0.3)" }}
+          >
+            {instrument}
+          </span>
         </span>
         <button type="button" onClick={onCancel} className="rounded p-1 hover:bg-white/5" style={{ color: "var(--text-muted)" }}>
           <X size={13} />
@@ -474,6 +551,14 @@ function EditForm({
         </div>
       </Section>
 
+      {/* ── 1b. Sorties alternatives ── */}
+      <AlternativeScenariosSection
+        outcome1R={outcome1R}
+        setOutcome1R={setOutcome1R}
+        outcome15R={outcome15R}
+        setOutcome15R={setOutcome15R}
+      />
+
       {/* ── 2. Timing ── */}
       <Section title="Timing">
         <div className="grid grid-cols-2 gap-2">
@@ -502,12 +587,6 @@ function EditForm({
               className={iCls} style={iStyle} />
           </div>
           <div>
-            <L htmlFor="e-exitPrice" field="exitPrice">Exit</L>
-            <input id="e-exitPrice" name="exitPrice" type="number" step="any" placeholder="0.00"
-              defaultValue={trade.exitPrice ?? ""}
-              className={iCls} style={iStyle} />
-          </div>
-          <div>
             <L htmlFor="e-stopLoss" field="stopLoss">Stop Loss</L>
             <input id="e-stopLoss" name="stopLoss" type="number" step="any" placeholder="SL"
               defaultValue={trade.stopLoss ?? ""}
@@ -520,28 +599,6 @@ function EditForm({
               className={iCls} style={iStyle} />
           </div>
         </div>
-
-        <div className="grid grid-cols-3 gap-2">
-          <div>
-            <L htmlFor="e-rMultiple" field="rMultiple">R-Multiple</L>
-            <input id="e-rMultiple" name="rMultiple" type="number" step="0.01" placeholder="auto"
-              defaultValue={trade.rMultiple ?? ""}
-              className={iCls} style={iStyle} />
-          </div>
-          <div>
-            <L htmlFor="e-pnlDollars" field="pnlDollars">P&L ($)</L>
-            <input id="e-pnlDollars" name="pnlDollars" type="number" step="0.01" placeholder="0.00"
-              defaultValue={trade.pnlDollars ?? ""}
-              className={iCls} style={iStyle} />
-          </div>
-          <div>
-            <L htmlFor="e-pnlPoints" field="pnlPoints">P&L (pts)</L>
-            <input id="e-pnlPoints" name="pnlPoints" type="number" step="0.01" placeholder="0.0"
-              defaultValue={trade.pnlPoints ?? ""}
-              className={iCls} style={iStyle} />
-          </div>
-        </div>
-
         <div>
           <L htmlFor="e-quantity" field="quantity">Quantity</L>
           <input id="e-quantity" name="quantity" type="number" step="0.01" min="0"
@@ -555,32 +612,32 @@ function EditForm({
         <div className="grid grid-cols-2 gap-2">
           <div>
             <L field="marketSession">Session</L>
-            <Sel name="marketSession" options={SESSIONS} defaultValue={trade.marketSession} />
+            <Combobox name="marketSession" options={SESSIONS} value={selects.marketSession} onChange={setSel("marketSession")} placeholder="— Select —" />
           </div>
           <div>
             <L field="timeframeEntry">TF Entry</L>
-            <Sel name="timeframeEntry" options={TIMEFRAMES} defaultValue={trade.timeframeEntry} />
+            <Combobox name="timeframeEntry" options={TIMEFRAMES} value={selects.timeframeEntry} onChange={setSel("timeframeEntry")} placeholder="— Select —" />
           </div>
           <div>
             <L field="timeframeTrend">TF Trend</L>
-            <Sel name="timeframeTrend" options={TIMEFRAMES} defaultValue={trade.timeframeTrend} />
+            <Combobox name="timeframeTrend" options={TIMEFRAMES} value={selects.timeframeTrend} onChange={setSel("timeframeTrend")} placeholder="— Select —" />
           </div>
           <div>
             <L field="liquiditySwept">Liq. Swept</L>
-            <Sel name="liquiditySwept" options={LIQUIDITIES} defaultValue={trade.liquiditySwept} />
+            <Combobox name="liquiditySwept" options={LIQUIDITIES} value={selects.liquiditySwept} onChange={setSel("liquiditySwept")} placeholder="— Select —" />
           </div>
           <div>
             <L field="biasHTF">Bias HTF</L>
-            <Sel name="biasHTF" options={BIASES} defaultValue={trade.biasHTF} />
+            <Combobox name="biasHTF" options={BIASES} value={selects.biasHTF} onChange={setSel("biasHTF")} placeholder="— Select —" />
           </div>
           <div>
             <L field="biasMTF">Bias MTF</L>
-            <Sel name="biasMTF" options={BIASES} defaultValue={trade.biasMTF} />
+            <Combobox name="biasMTF" options={BIASES} value={selects.biasMTF} onChange={setSel("biasMTF")} placeholder="— Select —" />
           </div>
         </div>
         <div>
           <L field="marketStructure">Market Structure</L>
-          <Sel name="marketStructure" options={STRUCTURES} defaultValue={trade.marketStructure} />
+          <Combobox name="marketStructure" options={STRUCTURES} value={selects.marketStructure} onChange={setSel("marketStructure")} placeholder="— Select —" />
         </div>
       </Section>
 
@@ -588,11 +645,11 @@ function EditForm({
       <Section title="ICT / SMC" collapsible defaultOpen={false}>
         <div>
           <L field="ictModel">Model</L>
-          <Sel name="ictModel" options={ICT_MODELS} defaultValue={trade.ictModel} />
+          <Combobox name="ictModel" options={ICT_MODELS} value={selects.ictModel} onChange={setSel("ictModel")} placeholder="— Select —" />
         </div>
         <div>
           <L field="poi">Point of Interest (POI)</L>
-          <Sel name="poi" options={POI_TYPES} defaultValue={trade.poi} />
+          <Combobox name="poi" options={POI_TYPES} value={selects.poi} onChange={setSel("poi")} placeholder="— Select —" />
         </div>
       </Section>
 
@@ -685,7 +742,7 @@ function EditForm({
 }
 
 /* ─── TradeRow ──────────────────────────────────────────────────────────── */
-export function TradeRow({ trade, backtestId }: { trade: Trade; backtestId: string }) {
+export function TradeRow({ trade, backtestId, instrument, rMultipleOverride }: { trade: Trade; backtestId: string; instrument: string; rMultipleOverride?: number | null }) {
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -694,10 +751,12 @@ export function TradeRow({ trade, backtestId }: { trade: Trade; backtestId: stri
     startTransition(() => deleteBacktestTrade(backtestId, trade.id));
   }
 
+  const displayR = rMultipleOverride !== undefined ? rMultipleOverride : trade.rMultiple;
+
   const rColor =
-    trade.rMultiple == null ? "var(--text-muted)"
-    : trade.rMultiple > 0   ? "var(--accent-tertiary-light)"
-    : trade.rMultiple < 0   ? "#f87171"
+    displayR == null ? "var(--text-muted)"
+    : displayR > 0   ? "var(--accent-tertiary-light)"
+    : displayR < 0   ? "#f87171"
     : "var(--text-secondary)";
 
   return (
@@ -753,8 +812,8 @@ export function TradeRow({ trade, backtestId }: { trade: Trade; backtestId: stri
 
           {/* R-multiple */}
           <span className="w-14 shrink-0 text-right text-base font-bold tabular-nums" style={{ color: rColor }}>
-            {trade.rMultiple != null
-              ? (trade.rMultiple >= 0 ? "+" : "") + trade.rMultiple.toFixed(2) + "R"
+            {displayR != null
+              ? (displayR >= 0 ? "+" : "") + displayR.toFixed(2) + "R"
               : "—"}
           </span>
 
@@ -805,6 +864,7 @@ export function TradeRow({ trade, backtestId }: { trade: Trade; backtestId: stri
           <EditForm
             trade={trade}
             backtestId={backtestId}
+            instrument={instrument}
             onCancel={() => setEditing(false)}
             onSaved={() => setEditing(false)}
           />

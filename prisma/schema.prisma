@@ -672,6 +672,12 @@ model BacktestTrade {
   // Screenshot URL (legacy single URL — kept for backwards compat)
   screenshotUrl String?
 
+  // ── Scénarios alternatifs de sortie ─────────────────────────────────────
+  outcome1R    TradeOutcome? // résultat si sorti à 1R
+  rMultiple1R  Float?        // R réalisé dans ce scénario (ex: +1.0 ou -0.8)
+  outcome15R   TradeOutcome? // résultat si sorti à 1.5R
+  rMultiple15R Float?        // R réalisé dans ce scénario
+
   createdAt DateTime @default(now())
 
   media BacktestTradeMedia[]

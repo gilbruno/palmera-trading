@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Plus, ChevronDown } from "lucide-react";
 import { AddTradeForm } from "./AddTradeForm";
 
-export function AddTradePanel({ backtestId }: { backtestId: string }) {
+export function AddTradePanel({ backtestId, instrument }: { backtestId: string; instrument: string }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -42,7 +42,7 @@ export function AddTradePanel({ backtestId }: { backtestId: string }) {
       {/* Collapsible body */}
       {open && (
         <div style={{ borderTop: "1px solid var(--border)" }}>
-          <AddTradeForm backtestId={backtestId} />
+          <AddTradeForm backtestId={backtestId} instrument={instrument} />
         </div>
       )}
     </div>

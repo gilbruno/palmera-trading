@@ -5,6 +5,9 @@ import { createPortal } from "react-dom";
 import { addBacktestTrade } from "../actions";
 import { TrendingUp, TrendingDown, Loader2, HelpCircle, X, ChevronDown } from "lucide-react";
 import { MediaUpload, type UploadedMedia } from "@/components/ui/MediaUpload";
+import { DateTimePicker } from "@/components/ui/DateTimePicker";
+import { Combobox } from "@/components/ui/Combobox";
+import { CheckToggle } from "@/components/ui/CheckToggle";
 
 /* ─── Styles ────────────────────────────────────────────────────────────── */
 const iStyle: React.CSSProperties = {
@@ -17,7 +20,6 @@ const iStyle: React.CSSProperties = {
 const lCls = "mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-widest";
 const lStyle: React.CSSProperties = { color: "var(--text-muted)" };
 const iCls = "block w-full px-2.5 py-2 text-base transition-all focus:ring-1 focus:ring-[var(--accent-primary)] placeholder:opacity-30";
-const sCls = `${iCls} appearance-none`;
 
 /* ─── Option maps ───────────────────────────────────────────────────────── */
 const SESSIONS = [
@@ -124,6 +126,10 @@ const OUTCOMES = [
 
 /* ─── Tooltips ──────────────────────────────────────────────────────────── */
 const TIPS: Record<string, string> = {
+  outcome1R:       "Résultat réel si tu avais sorti à 1R. Peut être WIN, LOSS ou B/E selon où était le prix au niveau 1R.",
+  rMultiple1R:     "R effectivement réalisé dans le scénario sortie à 1R. Ex: +1.0 si TP touché, -0.8 si SL touché avant.",
+  outcome15R:      "Résultat réel si tu avais sorti à 1.5R.",
+  rMultiple15R:    "R effectivement réalisé dans le scénario sortie à 1.5R.",
   direction:       "LONG si tu achètes en espérant une hausse. SHORT si tu vends en espérant une baisse.",
   entryDate:       "Date et heure exactes où tu as ouvert ta position.",
   exitDate:        "Date et heure de clôture. Laisse vide si encore ouvert.",
@@ -253,10 +259,10 @@ function GL({ field, children }: { field: string; children: React.ReactNode }) {
 }
 
 /* ─── Section wrapper ───────────────────────────────────────────────────── */
-function Section({ title, children, collapsible = false }: {
-  title: string; children: React.ReactNode; collapsible?: boolean;
+function Section({ title, children, collapsible = false, defaultOpen = true }: {
+  title: string; children: React.ReactNode; collapsible?: boolean; defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)" }}>
       <button
@@ -277,35 +283,33 @@ function Section({ title, children, collapsible = false }: {
   );
 }
 
-/* ─── Select ────────────────────────────────────────────────────────────── */
-function Sel({ name, options }: { name: string; options: { value: string; label: string }[] }) {
-  return (
-    <select name={name} className={sCls} style={iStyle}>
-      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
-  );
-}
-
 /* ─── Checkbox field ────────────────────────────────────────────────────── */
 function CheckField({ name, label, field }: { name: string; label: string; field: string }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2">
-      <input type="checkbox" name={name} value="true"
-        className="h-3.5 w-3.5 rounded accent-[var(--accent-primary)]" />
-      <span className="text-base" style={{ color: "var(--text-secondary)" }}>{label}</span>
+    <CheckToggle name={name} label={label}>
       <Tip field={field} />
-    </label>
+    </CheckToggle>
   );
 }
 
 /* ─── Form ──────────────────────────────────────────────────────────────── */
-export function AddTradeForm({ backtestId }: { backtestId: string }) {
+export function AddTradeForm({ backtestId, instrument }: { backtestId: string; instrument: string }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, startTransition] = useTransition();
   const [direction, setDirection] = useState<"LONG" | "SHORT">("LONG");
   const [outcome, setOutcome] = useState<string>("WIN");
   const [followedRules, setFollowedRules] = useState<"" | "true" | "false">("");
+  const [outcome1R, setOutcome1R] = useState<string>("");
+  const [outcome15R, setOutcome15R] = useState<string>("");
+  const [selects, setSelects] = useState<Record<string, string>>({
+    marketSession: "", timeframeEntry: "", timeframeTrend: "",
+    liquiditySwept: "", biasHTF: "", biasMTF: "", marketStructure: "",
+    ictModel: "", poi: "",
+  });
+  const setSel = (key: string) => (v: string) => setSelects((prev) => ({ ...prev, [key]: v }));
   const [error, setError] = useState<string | null>(null);
+  const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 16));
+  const [exitDate, setExitDate] = useState("");
   // savedTradeId is set after the trade row is persisted; used by MediaUpload.
   const [savedTradeId, setSavedTradeId] = useState<string | null>(null);
   // tempMedia holds uploads done before the trade exists (tradeId="temp")
@@ -319,6 +323,8 @@ export function AddTradeForm({ backtestId }: { backtestId: string }) {
     fd.set("direction", direction);
     fd.set("outcome", outcome);
     if (followedRules !== "") fd.set("followedRules", followedRules);
+    if (outcome1R) fd.set("outcome1R", outcome1R);
+    if (outcome15R) fd.set("outcome15R", outcome15R);
     startTransition(async () => {
       try {
         const storageKeys = tempMedia.map((m) => m.storageKey).filter(Boolean) as string[];
@@ -330,16 +336,30 @@ export function AddTradeForm({ backtestId }: { backtestId: string }) {
         setDirection("LONG");
         setOutcome("WIN");
         setFollowedRules("");
+        setOutcome1R("");
+        setOutcome15R("");
+        setSelects({ marketSession: "", timeframeEntry: "", timeframeTrend: "", liquiditySwept: "", biasHTF: "", biasMTF: "", marketStructure: "", ictModel: "", poi: "" });
+        setEntryDate(new Date().toISOString().slice(0, 16));
+        setExitDate("");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to add trade.");
       }
     });
   }
 
-  const today = new Date().toISOString().slice(0, 16);
-
   return (
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-3 px-4 py-4">
+
+      {/* ── Instrument badge ── */}
+      <div className="flex items-center gap-2 pb-1">
+        <span
+          className="rounded-lg px-2.5 py-1 text-sm font-bold tracking-wider"
+          style={{ backgroundColor: "rgba(99,102,241,0.15)", color: "#a5b4fc", border: "1px solid rgba(99,102,241,0.3)" }}
+        >
+          {instrument}
+        </span>
+        <span className="text-sm" style={{ color: "var(--text-muted)" }}>— nouveau trade</span>
+      </div>
 
       {/* ── 1. Direction & Outcome ── */}
       <Section title="Direction & Result">
@@ -377,18 +397,71 @@ export function AddTradeForm({ backtestId }: { backtestId: string }) {
         </div>
       </Section>
 
+      {/* ── 1b. Sorties alternatives ── */}
+      <Section title="Sorties alternatives (simulation)" collapsible defaultOpen={false}>
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+          Renseigne le résultat <em>réel</em> si tu avais pris tes profits plus tôt.
+        </p>
+
+        {/* 1R */}
+        <div>
+          <GL field="outcome1R">Si sorti à 1R</GL>
+          <div className="flex gap-2">
+            {OUTCOMES.map((o) => (
+              <button key={o.value} type="button" onClick={() => setOutcome1R(outcome1R === o.value ? "" : o.value)}
+                className="flex flex-1 items-center justify-center rounded-xl py-1.5 text-base font-semibold transition-all"
+                style={outcome1R === o.value
+                  ? { backgroundColor: "rgba(255,255,255,0.08)", border: `1px solid ${o.color}`, color: o.color }
+                  : { backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", color: "var(--text-muted)" }
+                }
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 1.5R */}
+        <div>
+          <GL field="outcome15R">Si sorti à 1.5R</GL>
+          <div className="flex gap-2">
+            {OUTCOMES.map((o) => (
+              <button key={o.value} type="button" onClick={() => setOutcome15R(outcome15R === o.value ? "" : o.value)}
+                className="flex flex-1 items-center justify-center rounded-xl py-1.5 text-base font-semibold transition-all"
+                style={outcome15R === o.value
+                  ? { backgroundColor: "rgba(255,255,255,0.08)", border: `1px solid ${o.color}`, color: o.color }
+                  : { backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", color: "var(--text-muted)" }
+                }
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </Section>
+
       {/* ── 2. Timing ── */}
       <Section title="Timing">
         <div className="grid grid-cols-2 gap-2">
           <div>
             <L htmlFor="entryDate" field="entryDate" req>Entry Date</L>
-            <input id="entryDate" name="entryDate" type="datetime-local" required
-              defaultValue={today} className={iCls} style={iStyle} />
+            <DateTimePicker
+              id="entryDate"
+              name="entryDate"
+              value={entryDate}
+              onChange={setEntryDate}
+              required
+            />
           </div>
           <div>
             <L htmlFor="exitDate" field="exitDate">Exit Date</L>
-            <input id="exitDate" name="exitDate" type="datetime-local"
-              className={iCls} style={iStyle} />
+            <DateTimePicker
+              id="exitDate"
+              name="exitDate"
+              value={exitDate}
+              onChange={setExitDate}
+              placeholder="Not closed yet"
+            />
           </div>
         </div>
       </Section>
@@ -402,11 +475,6 @@ export function AddTradeForm({ backtestId }: { backtestId: string }) {
               className={iCls} style={iStyle} />
           </div>
           <div>
-            <L htmlFor="exitPrice" field="exitPrice">Exit</L>
-            <input id="exitPrice" name="exitPrice" type="number" step="any" placeholder="0.00"
-              className={iCls} style={iStyle} />
-          </div>
-          <div>
             <L htmlFor="stopLoss" field="stopLoss">Stop Loss</L>
             <input id="stopLoss" name="stopLoss" type="number" step="any" placeholder="SL"
               className={iCls} style={iStyle} />
@@ -417,25 +485,6 @@ export function AddTradeForm({ backtestId }: { backtestId: string }) {
               className={iCls} style={iStyle} />
           </div>
         </div>
-
-        <div className="grid grid-cols-3 gap-2">
-          <div>
-            <L htmlFor="rMultiple" field="rMultiple">R-Multiple</L>
-            <input id="rMultiple" name="rMultiple" type="number" step="0.01" placeholder="auto"
-              className={iCls} style={iStyle} />
-          </div>
-          <div>
-            <L htmlFor="pnlDollars" field="pnlDollars">P&L ($)</L>
-            <input id="pnlDollars" name="pnlDollars" type="number" step="0.01" placeholder="0.00"
-              className={iCls} style={iStyle} />
-          </div>
-          <div>
-            <L htmlFor="pnlPoints" field="pnlPoints">P&L (pts)</L>
-            <input id="pnlPoints" name="pnlPoints" type="number" step="0.01" placeholder="0.0"
-              className={iCls} style={iStyle} />
-          </div>
-        </div>
-
         <div>
           <L htmlFor="quantity" field="quantity">Quantity</L>
           <input id="quantity" name="quantity" type="number" step="0.01" min="0" defaultValue="1"
@@ -447,45 +496,45 @@ export function AddTradeForm({ backtestId }: { backtestId: string }) {
       <Section title="Market Context" collapsible>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <L htmlFor="marketSession" field="marketSession">Session</L>
-            <Sel name="marketSession" options={SESSIONS} />
+            <L field="marketSession">Session</L>
+            <Combobox name="marketSession" options={SESSIONS} value={selects.marketSession} onChange={setSel("marketSession")} placeholder="— Select —" />
           </div>
           <div>
-            <L htmlFor="timeframeEntry" field="timeframeEntry">TF Entry</L>
-            <Sel name="timeframeEntry" options={TIMEFRAMES} />
+            <L field="timeframeEntry">TF Entry</L>
+            <Combobox name="timeframeEntry" options={TIMEFRAMES} value={selects.timeframeEntry} onChange={setSel("timeframeEntry")} placeholder="— Select —" />
           </div>
           <div>
-            <L htmlFor="timeframeTrend" field="timeframeTrend">TF Trend</L>
-            <Sel name="timeframeTrend" options={TIMEFRAMES} />
+            <L field="timeframeTrend">TF Trend</L>
+            <Combobox name="timeframeTrend" options={TIMEFRAMES} value={selects.timeframeTrend} onChange={setSel("timeframeTrend")} placeholder="— Select —" />
           </div>
           <div>
-            <L htmlFor="liquiditySwept" field="liquiditySwept">Liq. Swept</L>
-            <Sel name="liquiditySwept" options={LIQUIDITIES} />
+            <L field="liquiditySwept">Liq. Swept</L>
+            <Combobox name="liquiditySwept" options={LIQUIDITIES} value={selects.liquiditySwept} onChange={setSel("liquiditySwept")} placeholder="— Select —" />
           </div>
           <div>
-            <L htmlFor="biasHTF" field="biasHTF">Bias HTF</L>
-            <Sel name="biasHTF" options={BIASES} />
+            <L field="biasHTF">Bias HTF</L>
+            <Combobox name="biasHTF" options={BIASES} value={selects.biasHTF} onChange={setSel("biasHTF")} placeholder="— Select —" />
           </div>
           <div>
-            <L htmlFor="biasMTF" field="biasMTF">Bias MTF</L>
-            <Sel name="biasMTF" options={BIASES} />
+            <L field="biasMTF">Bias MTF</L>
+            <Combobox name="biasMTF" options={BIASES} value={selects.biasMTF} onChange={setSel("biasMTF")} placeholder="— Select —" />
           </div>
         </div>
         <div>
-          <L htmlFor="marketStructure" field="marketStructure">Market Structure</L>
-          <Sel name="marketStructure" options={STRUCTURES} />
+          <L field="marketStructure">Market Structure</L>
+          <Combobox name="marketStructure" options={STRUCTURES} value={selects.marketStructure} onChange={setSel("marketStructure")} placeholder="— Select —" />
         </div>
       </Section>
 
       {/* ── 5. ICT / SMC ── */}
       <Section title="ICT / SMC" collapsible>
         <div>
-          <L htmlFor="ictModel" field="ictModel">Model</L>
-          <Sel name="ictModel" options={ICT_MODELS} />
+          <L field="ictModel">Model</L>
+          <Combobox name="ictModel" options={ICT_MODELS} value={selects.ictModel} onChange={setSel("ictModel")} placeholder="— Select —" />
         </div>
         <div>
-          <L htmlFor="poi" field="poi">Point of Interest (POI)</L>
-          <Sel name="poi" options={POI_TYPES} />
+          <L field="poi">Point of Interest (POI)</L>
+          <Combobox name="poi" options={POI_TYPES} value={selects.poi} onChange={setSel("poi")} placeholder="— Select —" />
         </div>
       </Section>
 

@@ -3,6 +3,8 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 import { Search } from "lucide-react";
+import { Combobox } from "@/components/ui/Combobox";
+import { DateTimePicker } from "@/components/ui/DateTimePicker";
 
 const iStyle: React.CSSProperties = {
   backgroundColor: "rgba(255,255,255,0.04)",
@@ -13,7 +15,6 @@ const iStyle: React.CSSProperties = {
 };
 const iCls =
   "block px-2.5 py-2 text-sm transition-all focus:ring-1 focus:ring-[var(--accent-primary)] placeholder:opacity-40";
-const sCls = `${iCls} appearance-none`;
 
 export function TradesFilter() {
   const router = useRouter();
@@ -61,50 +62,58 @@ export function TradesFilter() {
       </div>
 
       {/* Direction */}
-      <select
-        defaultValue={direction}
-        onChange={(e) => update("direction", e.target.value)}
-        className={sCls}
-        style={{ ...iStyle, width: "7.5rem" }}
-      >
-        <option value="">All directions</option>
-        <option value="LONG">Long only</option>
-        <option value="SHORT">Short only</option>
-      </select>
+      <div style={{ width: "7.5rem" }}>
+        <Combobox
+          name="direction"
+          value={direction}
+          onChange={(v) => update("direction", v)}
+          placeholder="All directions"
+          options={[
+            { value: "", label: "All directions" },
+            { value: "LONG", label: "Long only" },
+            { value: "SHORT", label: "Short only" },
+          ]}
+        />
+      </div>
 
       {/* Outcome */}
-      <select
-        defaultValue={outcome}
-        onChange={(e) => update("outcome", e.target.value)}
-        className={sCls}
-        style={{ ...iStyle, width: "8rem" }}
-      >
-        <option value="">All outcomes</option>
-        <option value="WIN">Win</option>
-        <option value="LOSS">Loss</option>
-        <option value="BREAKEVEN">Breakeven</option>
-        <option value="OPEN">Open</option>
-      </select>
+      <div style={{ width: "8rem" }}>
+        <Combobox
+          name="outcome"
+          value={outcome}
+          onChange={(v) => update("outcome", v)}
+          placeholder="All outcomes"
+          options={[
+            { value: "", label: "All outcomes" },
+            { value: "WIN", label: "Win" },
+            { value: "LOSS", label: "Loss" },
+            { value: "BREAKEVEN", label: "Breakeven" },
+            { value: "OPEN", label: "Open" },
+          ]}
+        />
+      </div>
 
       {/* Date range */}
       <div className="flex items-center gap-1">
-        <input
-          type="date"
-          defaultValue={from}
-          onChange={(e) => update("from", e.target.value)}
-          title="From date"
-          className={iCls}
-          style={{ ...iStyle, width: "8.5rem", colorScheme: "dark" }}
-        />
+        <div style={{ width: "9rem" }}>
+          <DateTimePicker
+            name="from"
+            value={from ? `${from}T00:00` : ""}
+            onChange={(v) => update("from", v ? v.split("T")[0] : "")}
+            placeholder="From date"
+            dateOnly
+          />
+        </div>
         <span className="text-xs" style={{ color: "var(--text-muted)" }}>→</span>
-        <input
-          type="date"
-          defaultValue={to}
-          onChange={(e) => update("to", e.target.value)}
-          title="To date"
-          className={iCls}
-          style={{ ...iStyle, width: "8.5rem", colorScheme: "dark" }}
-        />
+        <div style={{ width: "9rem" }}>
+          <DateTimePicker
+            name="to"
+            value={to ? `${to}T00:00` : ""}
+            onChange={(v) => update("to", v ? v.split("T")[0] : "")}
+            placeholder="To date"
+            dateOnly
+          />
+        </div>
       </div>
     </div>
   );

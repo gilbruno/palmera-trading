@@ -3,181 +3,13 @@ import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import Link from "next/link";
-import {
-  FlaskConical, ArrowLeft, CheckCircle, Clock, BarChart2, Minus,
-  TrendingUp, TrendingDown,
-} from "lucide-react";
+import { ArrowLeft, CheckCircle, Clock, Minus } from "lucide-react";
 import type { BacktestStatus, Direction, TradeOutcome } from "@/generated/prisma/enums";
 import { AddTradePanel } from "./AddTradePanel";
-import { TradeRow } from "./TradeRow";
 import { DeleteButton } from "./DeleteButton";
 import { updateBacktestStatus } from "../actions";
 import { PrimaryButton } from "@/components/ui/PrimaryButton";
-
-/* ─── Stat helpers ──────────────────────────────────────────────────────── */
-function computeStats(trades: {
-  outcome: TradeOutcome | null;
-  rMultiple: number | null;
-  pnlDollars: number | null;
-}[]) {
-  const closed = trades.filter((t) => t.outcome !== null);
-  const total = closed.length;
-  if (total === 0) return null;
-
-  const wins = closed.filter((t) => t.outcome === "WIN");
-  const losses = closed.filter((t) => t.outcome === "LOSS");
-  const winrate = (wins.length / total) * 100;
-
-  const withR = closed.filter((t) => t.rMultiple !== null);
-  const sumWinR = wins.filter((t) => t.rMultiple !== null).reduce((s, t) => s + t.rMultiple!, 0);
-  const sumLossR = Math.abs(losses.filter((t) => t.rMultiple !== null).reduce((s, t) => s + t.rMultiple!, 0));
-  const totalR = withR.reduce((s, t) => s + t.rMultiple!, 0);
-  const avgWinR = wins.filter((t) => t.rMultiple !== null).length > 0
-    ? sumWinR / wins.filter((t) => t.rMultiple !== null).length : null;
-  const avgLossR = losses.filter((t) => t.rMultiple !== null).length > 0
-    ? sumLossR / losses.filter((t) => t.rMultiple !== null).length : null;
-  const profitFactor = sumLossR > 0 ? sumWinR / sumLossR : sumWinR > 0 ? Infinity : null;
-  const expectancy = withR.length > 0 ? totalR / withR.length : null;
-
-  let peak = 0, maxDD = 0, cumR = 0;
-  for (const t of withR) {
-    cumR += t.rMultiple!;
-    if (cumR > peak) peak = cumR;
-    const dd = peak - cumR;
-    if (dd > maxDD) maxDD = dd;
-  }
-
-  const totalPnl = closed.filter((t) => t.pnlDollars !== null).reduce((s, t) => s + t.pnlDollars!, 0);
-
-  return {
-    total,
-    wins: wins.length,
-    losses: losses.length,
-    breakeven: closed.filter((t) => t.outcome === "BREAKEVEN").length,
-    winrate,
-    profitFactor,
-    expectancy,
-    totalR,
-    avgWinR,
-    avgLossR,
-    maxDD,
-    totalPnl,
-    bestR: withR.length > 0 ? Math.max(...withR.map((t) => t.rMultiple!)) : null,
-    worstR: withR.length > 0 ? Math.min(...withR.map((t) => t.rMultiple!)) : null,
-  };
-}
-
-function fmtR(v: number | null | undefined): string {
-  if (v == null) return "—";
-  return (v >= 0 ? "+" : "") + v.toFixed(2) + "R";
-}
-function fmtPct(v: number | null | undefined): string {
-  if (v == null) return "—";
-  return v.toFixed(1) + "%";
-}
-function fmtPF(v: number | null | undefined): string {
-  if (v == null) return "—";
-  if (!isFinite(v)) return "∞";
-  return v.toFixed(2);
-}
-
-/* ─── Compact KPI cell ──────────────────────────────────────────────────── */
-function KpiCell({
-  label, value, positive, neutral,
-}: {
-  label: string; value: string; positive?: boolean; neutral?: boolean;
-}) {
-  const color = neutral
-    ? "var(--text-secondary)"
-    : value === "—"
-    ? "var(--text-muted)"
-    : positive
-    ? "var(--accent-tertiary-light)"
-    : "#f87171";
-  return (
-    <div
-      className="flex flex-col items-center justify-center rounded-xl px-3 py-2.5 text-center"
-      style={{ backgroundColor: "rgba(255,255,255,0.02)", border: "1px solid var(--border)" }}
-    >
-      <p
-        className="mb-1 text-xs font-semibold uppercase tracking-widest"
-        style={{
-          color: "var(--text-muted)",
-          fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
-          letterSpacing: "0.12em",
-        }}
-      >
-        {label}
-      </p>
-      <p className="text-lg font-bold tabular-nums leading-none" style={{ color }}>
-        {value}
-      </p>
-    </div>
-  );
-}
-
-/* ─── Equity curve mini ─────────────────────────────────────────────────── */
-function EquityCurveMini({
-  trades,
-}: {
-  trades: { rMultiple: number | null; outcome: TradeOutcome | null }[];
-}) {
-  const withR = trades.filter((t) => t.rMultiple !== null && t.outcome !== null);
-  if (withR.length === 0) return null;
-
-  // Build cumulative R series
-  let cum = 0;
-  const points = withR.map((t) => {
-    cum += t.rMultiple!;
-    return { r: t.rMultiple!, cum };
-  });
-
-  const total = points.length;
-  const maxAbs = Math.max(...points.map((p) => Math.abs(p.cum)), 0.01);
-
-  return (
-    <div
-      className="mb-6 overflow-hidden rounded-2xl px-5 py-3"
-      style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}
-    >
-      <div className="mb-2 flex items-center justify-between">
-        <p
-          className="text-base font-semibold uppercase tracking-widest"
-          style={{
-            color: "var(--text-muted)",
-            fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
-          }}
-        >
-          Equity curve · {total} trades · {fmtR(cum)} cumulative
-        </p>
-        <p className="text-sm tabular-nums" style={{ color: cum >= 0 ? "var(--accent-tertiary-light)" : "#f87171" }}>
-          {cum >= 0 ? "+" : ""}{cum.toFixed(2)}R
-        </p>
-      </div>
-
-      {/* Segmented progress bar */}
-      <div className="flex h-2 w-full gap-px overflow-hidden rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.04)" }}>
-        {points.map((p, i) => {
-          const widthPct = 100 / total;
-          const color = p.r > 0 ? "var(--accent-tertiary)" : p.r < 0 ? "#ef4444" : "var(--text-muted)";
-          const opacity = 0.5 + 0.5 * (Math.abs(p.r) / (maxAbs / total || 1));
-          return (
-            <div
-              key={i}
-              style={{
-                width: `${widthPct}%`,
-                backgroundColor: color,
-                opacity: Math.min(opacity, 1),
-                flexShrink: 0,
-              }}
-              title={`Trade ${i + 1}: ${p.r >= 0 ? "+" : ""}${p.r.toFixed(2)}R (cum: ${fmtR(p.cum)})`}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+import { BacktestScenarioView } from "./BacktestScenarioView";
 
 /* ─── Status badge ──────────────────────────────────────────────────────── */
 function StatusBadge({ status }: { status: BacktestStatus }) {
@@ -222,7 +54,6 @@ export default async function BacktestDetailPage({
 
   if (!backtest) notFound();
 
-  const stats = computeStats(backtest.trades);
   const periodFmt = (d: Date) =>
     d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
@@ -291,105 +122,22 @@ export default async function BacktestDetailPage({
         </div>
       </div>
 
-      {/* ── KPI bar — 8 cells, single row ── */}
-      {stats ? (
-        <div className="mb-6 grid grid-cols-8 gap-2">
-          <KpiCell label="Trades"      value={String(stats.total)}                                                        neutral />
-          <KpiCell label="Winrate"     value={fmtPct(stats.winrate)}                                                      positive={stats.winrate >= 50} />
-          <KpiCell label="Prof. Factor" value={fmtPF(stats.profitFactor)}                                                 positive={stats.profitFactor !== null && (isFinite(stats.profitFactor) ? stats.profitFactor >= 1 : true)} />
-          <KpiCell label="Expectancy"  value={fmtR(stats.expectancy)}                                                     positive={(stats.expectancy ?? 0) > 0} />
-          <KpiCell label="Total R"     value={fmtR(stats.totalR)}                                                         positive={(stats.totalR ?? 0) > 0} />
-          <KpiCell label="Avg Win"     value={fmtR(stats.avgWinR)}                                                        positive />
-          <KpiCell label="Avg Loss"    value={stats.avgLossR != null ? "-" + stats.avgLossR.toFixed(2) + "R" : "—"}       positive={false} />
-          <KpiCell label="Max DD"      value={stats.maxDD > 0 ? "-" + stats.maxDD.toFixed(2) + "R" : "0R"}                positive={stats.maxDD === 0} />
-        </div>
-      ) : (
-        <div
-          className="mb-6 flex items-center gap-3 rounded-2xl px-6 py-4"
-          style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-muted)" }}
-        >
-          <BarChart2 size={16} />
-          <p className="text-lg">No completed trades yet — add trades to see statistics.</p>
-        </div>
-      )}
-
-      {/* ── Equity curve mini bar ── */}
-      <EquityCurveMini trades={backtest.trades} />
-
-      {/* ── Trade table — full width ── */}
-      <div
-        className="mb-6 overflow-hidden rounded-2xl"
-        style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}
-      >
-        {/* Table header row */}
-        <div
-          className="flex items-center justify-between border-b px-5 py-4"
-          style={{ borderColor: "var(--border)" }}
-        >
-          <div className="flex items-center gap-3">
-            <p className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
-              Trades ({backtest.trades.length})
-            </p>
-            {backtest.trades.length > 0 && (
-              <div className="flex items-center gap-2 text-sm" style={{ color: "var(--text-muted)" }}>
-                <span className="flex items-center gap-1">
-                  <TrendingUp size={11} style={{ color: "var(--accent-tertiary-light)" }} />
-                  {backtest.trades.filter((t) => t.outcome === "WIN").length}W
-                </span>
-                <span className="flex items-center gap-1">
-                  <TrendingDown size={11} style={{ color: "#f87171" }} />
-                  {backtest.trades.filter((t) => t.outcome === "LOSS").length}L
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Column headers */}
-        {backtest.trades.length > 0 && (
-          <div
-            className="flex items-center gap-3 border-b px-5 py-2"
-            style={{ borderColor: "var(--border)", backgroundColor: "rgba(255,255,255,0.01)" }}
-          >
-            <span className="w-5 shrink-0 text-base font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>#</span>
-            <span className="w-14 shrink-0 text-base font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Dir.</span>
-            <span className="w-20 shrink-0 text-base font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Date</span>
-            <span className="w-28 shrink-0 text-base font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Entry → Exit</span>
-            <span className="w-12 shrink-0 text-base font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Result</span>
-            <span className="w-14 shrink-0 text-right text-base font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>R</span>
-            <span className="w-16 shrink-0 text-right text-base font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>P&L $</span>
-            <span className="w-16 shrink-0 text-base font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Grade</span>
-            <span className="flex-1 text-base font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Notes</span>
-            <span className="ml-auto w-16 shrink-0" />
-          </div>
-        )}
-
-        {backtest.trades.length === 0 ? (
-          <div className="py-12 text-center">
-            <p className="text-lg" style={{ color: "var(--text-muted)" }}>
-              No trades yet. Use the form below to add your first trade.
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y" style={{ borderColor: "var(--border)" }}>
-            {backtest.trades.map((trade) => (
-              <TradeRow
-                key={trade.id}
-                trade={{
-                  ...trade,
-                  direction: trade.direction as Direction,
-                  outcome: trade.outcome as TradeOutcome | null,
-                  media: trade.media,
-                }}
-                backtestId={backtest.id}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      {/* ── KPI bar + Equity curve + Trade table (client, with scenario selector) ── */}
+      <BacktestScenarioView
+        instrument={backtest.instrument}
+        trades={backtest.trades.map((t) => ({
+          ...t,
+          direction: t.direction as Direction,
+          outcome:   t.outcome   as TradeOutcome | null,
+          outcome1R:  t.outcome1R  as TradeOutcome | null,
+          outcome15R: t.outcome15R as TradeOutcome | null,
+          media: t.media,
+        }))}
+        backtestId={backtest.id}
+      />
 
       {/* ── Add Trade — collapsible panel ── */}
-      <AddTradePanel backtestId={backtest.id} />
+      <AddTradePanel backtestId={backtest.id} instrument={backtest.instrument} />
 
       {/* ── Notes ── */}
       {backtest.notes && (

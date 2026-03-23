@@ -9,6 +9,8 @@ import { createTrade, updateTrade } from "./actions";
 import { Combobox } from "@/components/ui/Combobox";
 import { MediaUpload, type UploadedMedia } from "@/components/ui/MediaUpload";
 import { SuccessToast } from "@/components/ui/SuccessToast";
+import { DateTimePicker } from "@/components/ui/DateTimePicker";
+import { CheckToggle } from "@/components/ui/CheckToggle";
 
 /* ─── Shared input styles ───────────────────────────────────────────────── */
 const iStyle: React.CSSProperties = {
@@ -394,13 +396,9 @@ function Sel({
 /* ─── Checkbox field ────────────────────────────────────────────────────── */
 function CheckField({ name, label, field, defaultChecked }: { name: string; label: string; field: string; defaultChecked?: boolean }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2">
-      <input type="checkbox" name={name} value="true"
-        defaultChecked={defaultChecked}
-        className="h-3.5 w-3.5 rounded accent-[var(--accent-primary)]" />
-      <span className="text-sm" style={{ color: "var(--text-secondary)" }}>{label}</span>
+    <CheckToggle name={name} label={label} defaultChecked={defaultChecked}>
       <Tip field={field} />
-    </label>
+    </CheckToggle>
   );
 }
 
@@ -507,6 +505,12 @@ export function TradeForm({ setups, trade, onSuccess, onCancel }: TradeFormProps
   const [assetClass, setAssetClass] = useState<string>(trade?.assetClass ?? "FOREX");
   const [outcome, setOutcome] = useState<string>(trade?.outcome ?? "");
   const [planAdherence, setPlanAdherence] = useState<string>(trade?.planAdherence ?? "");
+  const [entryTime, setEntryTime] = useState<string>(
+    trade ? fmtDatetimeLocal(trade.entryTime) : fmtDatetimeLocal(new Date())
+  );
+  const [exitTime, setExitTime] = useState<string>(
+    fmtDatetimeLocal(trade?.exitTime ?? null)
+  );
 
   // In add mode: set after the trade is saved to reveal MediaUpload.
   const [savedTradeId, setSavedTradeId] = useState<string | null>(null);
@@ -537,6 +541,8 @@ export function TradeForm({ setups, trade, onSuccess, onCancel }: TradeFormProps
           setAssetClass("FOREX");
           setOutcome("");
           setPlanAdherence("");
+          setEntryTime(fmtDatetimeLocal(new Date()));
+          setExitTime("");
           setTempMedia([]);
           setSavedTradeId(newId);
           setToastMessage("Trade enregistré");
@@ -547,8 +553,6 @@ export function TradeForm({ setups, trade, onSuccess, onCancel }: TradeFormProps
       }
     });
   }
-
-  const nowLocal = fmtDatetimeLocal(new Date());
 
   return (
     <>
@@ -612,18 +616,22 @@ export function TradeForm({ setups, trade, onSuccess, onCancel }: TradeFormProps
         <div className="grid grid-cols-2 gap-2">
           <div>
             <L htmlFor="entryTime" field="entryTime" req>Entry Time</L>
-            <input
-              id="entryTime" name="entryTime" type="datetime-local" required
-              defaultValue={trade ? fmtDatetimeLocal(trade.entryTime) : nowLocal}
-              className={iCls} style={iStyle}
+            <DateTimePicker
+              id="entryTime"
+              name="entryTime"
+              value={entryTime}
+              onChange={setEntryTime}
+              required
             />
           </div>
           <div>
             <L htmlFor="exitTime" field="exitTime">Exit Time</L>
-            <input
-              id="exitTime" name="exitTime" type="datetime-local"
-              defaultValue={fmtDatetimeLocal(trade?.exitTime)}
-              className={iCls} style={iStyle}
+            <DateTimePicker
+              id="exitTime"
+              name="exitTime"
+              value={exitTime}
+              onChange={setExitTime}
+              placeholder="Not closed yet"
             />
           </div>
         </div>
