@@ -4,7 +4,7 @@ import { useState, useTransition, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
   TrendingUp, TrendingDown, Trash2, Star, Pencil, X, Check,
-  Loader2, HelpCircle, ChevronDown,
+  Loader2, HelpCircle, ChevronDown, ExternalLink,
 } from "lucide-react";
 import type { Direction, TradeOutcome } from "@/generated/prisma/enums";
 import { deleteBacktestTrade, updateBacktestTrade } from "../actions";
@@ -829,9 +829,22 @@ export function TradeRow({ trade, backtestId, instrument, rMultipleOverride }: {
             <GradeStars grade={trade.grade} />
           </span>
 
-          {/* Notes */}
-          <span className="flex-1 truncate text-base" style={{ color: "var(--text-muted)" }}>
-            {trade.notes ?? ""}
+          {/* Notes + screenshot links */}
+          <span className="flex-1 min-w-0 flex flex-wrap items-center gap-2 text-base" style={{ color: "var(--text-muted)" }}>
+            <span className="truncate">{trade.notes ?? ""}</span>
+            {trade.media && trade.media.length > 0 && trade.media.map((m, i) => (
+              <a
+                key={m.id}
+                href={m.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex shrink-0 items-center gap-1 text-xs hover:underline"
+                style={{ color: "var(--accent-primary-light)" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink size={10} /> Chart {trade.media!.length > 1 ? i + 1 : ""}
+              </a>
+            ))}
           </span>
 
           {/* Actions */}
