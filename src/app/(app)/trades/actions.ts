@@ -101,16 +101,26 @@ function extractFields(fd: FormData) {
   const takeProfit1 = getOptionalFloat(fd, "takeProfit");
   const quantity = getFloat(fd, "quantity", 1);
 
+  // Outcome anticipé pour le fallback du calcul de R
+  const outcomeForR = getEnum(fd, "outcome", OUTCOMES) as TradeOutcome | null;
+
   // Auto-compute R-multiple if not provided
   let rMultiple = getOptionalFloat(fd, "rMultiple");
-  if (rMultiple === null && exitPrice !== null && stopLoss !== null) {
-    const risk = Math.abs(entryPriceRaw - stopLoss);
-    if (risk > 0) {
-      const pnl =
-        directionRaw === "LONG"
-          ? exitPrice - entryPriceRaw
-          : entryPriceRaw - exitPrice;
-      rMultiple = pnl / risk;
+  if (rMultiple === null && stopLoss !== null) {
+    // Prix de sortie effectif : exitPrice réel, sinon takeProfit si WIN, sinon stopLoss si LOSS
+    const effectiveExit = exitPrice
+      ?? (outcomeForR === "WIN"  ? takeProfit1 : null)
+      ?? (outcomeForR === "LOSS" ? stopLoss    : null);
+    if (effectiveExit !== null) {
+      const risk = directionRaw === "LONG"
+        ? entryPriceRaw - stopLoss
+        : stopLoss - entryPriceRaw;
+      if (risk > 0) {
+        const pnl = directionRaw === "LONG"
+          ? effectiveExit - entryPriceRaw
+          : entryPriceRaw - effectiveExit;
+        rMultiple = Math.round((pnl / risk) * 10000) / 10000;
+      }
     }
   }
 

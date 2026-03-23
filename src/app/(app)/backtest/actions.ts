@@ -136,11 +136,32 @@ function extractTradeFields(fd: FormData) {
   const exitPrice = getOptionalFloat(fd, "exitPrice");
   const stopLoss = getOptionalFloat(fd, "stopLoss");
 
-  // rMultiple déduit de l'outcome (backtest simplifié, pas de slippage)
-  const rMultiple = outcomeRaw === "WIN" ? 1.0
-    : outcomeRaw === "LOSS" ? -1.0
-    : outcomeRaw === "BREAKEVEN" ? 0
-    : null;
+  const takeProfit = getOptionalFloat(fd, "takeProfit");
+
+  // Prix de sortie effectif : exitPrice réel, sinon TP si WIN, sinon SL si LOSS
+  const effectiveExit = exitPrice
+    ?? (outcomeRaw === "WIN"  ? takeProfit : null)
+    ?? (outcomeRaw === "LOSS" ? stopLoss   : null);
+
+  // rMultiple calculé à partir des prix réels si disponibles, sinon déduit de l'outcome
+  let rMultiple: number | null = null;
+  if (entryPrice !== null && effectiveExit !== null && stopLoss !== null) {
+    const risk = directionRaw === "LONG"
+      ? entryPrice - stopLoss
+      : stopLoss - entryPrice;
+    if (risk > 0) {
+      const pnl = directionRaw === "LONG"
+        ? effectiveExit - entryPrice
+        : entryPrice - effectiveExit;
+      rMultiple = Math.round((pnl / risk) * 10000) / 10000;
+    }
+  } else if (outcomeRaw === "WIN") {
+    rMultiple = 1.0;
+  } else if (outcomeRaw === "LOSS") {
+    rMultiple = -1.0;
+  } else if (outcomeRaw === "BREAKEVEN") {
+    rMultiple = 0;
+  }
 
   const tagsRaw = getOptional(fd, "tags");
   const tags = tagsRaw
@@ -164,7 +185,7 @@ function extractTradeFields(fd: FormData) {
     entryPrice:     entryPrice ?? 0,
     exitPrice,
     stopLoss,
-    takeProfit:     getOptionalFloat(fd, "takeProfit"),
+    takeProfit,
     outcome:        outcomeRaw ? (outcomeRaw as TradeOutcome) : null,
     rMultiple,
     pnlPoints:      getOptionalFloat(fd, "pnlPoints"),
@@ -199,6 +220,34 @@ function extractTradeFields(fd: FormData) {
                 : getEnum(fd, "outcome15R", ["WIN", "LOSS"]) === "LOSS" ? -1.0
                 : null,
   };
+}
+
+/* ─── recalcAllRMultiples ───────────────────────────────────────────────── */
+async function recalcAllRMultiples(backtestId: string): Promise<void> {
+  const trades = await prisma.backtestTrade.findMany({
+    where: { backtestId, stopLoss: { not: null } },
+    select: { id: true, direction: true, entryPrice: true, exitPrice: true, stopLoss: true, takeProfit: true, outcome: true },
+  });
+
+  await Promise.all(
+    trades.map((t) => {
+      const effectiveExit = t.exitPrice
+        ?? (t.outcome === "WIN"  ? t.takeProfit : null)
+        ?? (t.outcome === "LOSS" ? t.stopLoss   : null);
+      if (effectiveExit === null) return Promise.resolve();
+
+      const risk = t.direction === "LONG"
+        ? t.entryPrice - t.stopLoss!
+        : t.stopLoss! - t.entryPrice;
+      if (risk <= 0) return Promise.resolve();
+
+      const pnl = t.direction === "LONG"
+        ? effectiveExit - t.entryPrice
+        : t.entryPrice - effectiveExit;
+      const rMultiple = Math.round((pnl / risk) * 10000) / 10000;
+      return prisma.backtestTrade.update({ where: { id: t.id }, data: { rMultiple } });
+    })
+  );
 }
 
 /* ─── addBacktestTrade ──────────────────────────────────────────────────── */
@@ -239,6 +288,7 @@ export async function addBacktestTrade(
     select: { id: true },
   });
 
+  await recalcAllRMultiples(backtestId);
   revalidatePath(`/backtest/${backtestId}`);
   return trade.id;
 }
@@ -264,6 +314,7 @@ export async function updateBacktestTrade(
     data: fields,
   });
 
+  await recalcAllRMultiples(backtestId);
   revalidatePath(`/backtest/${backtestId}`);
 }
 
