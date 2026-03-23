@@ -64,3 +64,51 @@ export async function createSetup(formData: FormData): Promise<void> {
 
   redirect("/setups");
 }
+
+/* ─── updateSetup ──────────────────────────────────────────────────────── */
+export async function updateSetup(id: string, formData: FormData): Promise<void> {
+  const userId = await requireUserId();
+
+  const name = getString(formData, "name");
+  const description = getOptionalString(formData, "description");
+  const entryRules = getOptionalString(formData, "entryRules");
+  const exitRules = getOptionalString(formData, "exitRules");
+  const riskRules = getOptionalString(formData, "riskRules");
+  const notes = getOptionalString(formData, "notes");
+  const isActive = formData.get("isActive") === "on";
+
+  // ── Validation ──────────────────────────────────────────────────────────
+  if (name.length === 0) {
+    throw new Error("Setup name is required.");
+  }
+  if (name.length > 100) {
+    throw new Error("Setup name must be 100 characters or fewer.");
+  }
+  if (description && description.length > 500) {
+    throw new Error("Description must be 500 characters or fewer.");
+  }
+
+  // Verify ownership before updating
+  const existing = await prisma.setup.findFirst({ where: { id, userId } });
+  if (!existing) redirect("/setups");
+
+  await prisma.setup.update({
+    where: { id },
+    data: { name, description, entryRules, exitRules, riskRules, notes, isActive },
+  });
+
+  redirect(`/setups/${id}`);
+}
+
+/* ─── deleteSetup ──────────────────────────────────────────────────────── */
+export async function deleteSetup(id: string): Promise<void> {
+  const userId = await requireUserId();
+
+  // Verify ownership before deleting
+  const existing = await prisma.setup.findFirst({ where: { id, userId } });
+  if (!existing) redirect("/setups");
+
+  await prisma.setup.delete({ where: { id } });
+
+  redirect("/setups");
+}
