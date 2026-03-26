@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 import { BookOpen, TrendingUp, BookMarked, Calculator, FlaskConical, Menu, X } from "lucide-react";
 import { LogoutButton } from "@/components/ui/LogoutButton";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
 interface NavItem {
   label: string;
@@ -155,6 +156,9 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
       <div className="mx-4 mt-2 h-px" style={{ backgroundColor: "var(--border)" }} />
       <div className="px-3 py-3">
         <LogoutButton />
+        <div className="mt-2 px-3">
+          <ThemeToggle />
+        </div>
         <p className="mt-2 px-3 text-[11px]" style={{ color: "var(--text-muted)" }}>
           v0.1.0
         </p>

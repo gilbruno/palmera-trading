@@ -37,6 +37,32 @@
   --foreground: var(--text-primary);
 }
 
+/* ─── Light mode tokens ───────────────────────────────────────────────── */
+:root.light {
+  --bg-base:    #f9f6ee;
+  --bg-sidebar: #f0ece0;
+  --bg-card:    #ffffff;
+  --bg-input:   #f0ece0;
+
+  --border:     #d4cdb0;
+
+  --text-primary:   #1a1710;
+  --text-secondary: #5a5238;
+  --text-muted:     #a89d7a;
+
+  --accent-primary:        #c9a800;
+  --accent-primary-light:  #e6c200;
+  --accent-secondary:      #d97000;
+  --accent-secondary-light:#f08020;
+  --accent-tertiary:       #00a07a;
+  --accent-tertiary-light: #00c896;
+
+  --accent-red: #dc2626;
+
+  --background: var(--bg-base);
+  --foreground: var(--text-primary);
+}
+
 @theme inline {
   --color-background:          var(--bg-base);
   --color-foreground:          var(--text-primary);
