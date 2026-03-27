@@ -8,6 +8,7 @@ import { updateSetup } from "../actions";
 import { ActiveToggle } from "@/components/ui/ActiveToggle";
 import { FormActions } from "@/components/ui/FormActions";
 import { DeleteButton } from "./DeleteButton";
+import { calculateSetupPerformance } from "@/lib/utils/setup-stats";
 
 /* ─── Field primitives ─────────────────────────────────────────────────── */
 function Label({
@@ -169,15 +170,27 @@ export default async function SetupDetailPage({
 
   const setup = await prisma.setup.findFirst({
     where: { id, userId: session.user.id },
+    include: {
+      trades: {
+        select: {
+          id: true,
+          outcome: true,
+          pnlNet: true,
+          rMultiple: true,
+        },
+      },
+    },
   });
 
   if (!setup) notFound();
 
-  const fmt = (v: { toString(): string } | null, dec = 2) =>
-    v == null ? "—" : parseFloat(v.toString()).toFixed(dec);
+  const performance = calculateSetupPerformance(setup.trades);
 
-  const winRateNum = setup.winRate != null ? parseFloat(setup.winRate.toString()) : null;
-  const avgRNum = setup.avgRMultiple != null ? parseFloat(setup.avgRMultiple.toString()) : null;
+  const fmt = (v: number | null, dec = 2) =>
+    v == null ? "—" : v.toFixed(dec);
+
+  const winRateNum = performance.winRate;
+  const avgRNum = performance.avgRMultiple;
 
   const updateWithId = updateSetup.bind(null, id);
 
@@ -220,16 +233,21 @@ export default async function SetupDetailPage({
       </div>
 
       {/* Stats row */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatPill
           label="Win Rate"
-          value={winRateNum != null ? `${fmt(setup.winRate)}%` : "—"}
+          value={winRateNum != null ? `${fmt(winRateNum)}%` : "—"}
           positive={winRateNum != null ? winRateNum >= 50 : null}
         />
         <StatPill
           label="Avg R"
-          value={avgRNum != null ? `${fmt(setup.avgRMultiple, 2)}R` : "—"}
+          value={avgRNum != null ? `${fmt(avgRNum, 2)}R` : "—"}
           positive={avgRNum != null ? avgRNum >= 0 : null}
+        />
+        <StatPill
+          label="Closed Trades"
+          value={performance.closedTrades.toString()}
+          positive={null}
         />
         <StatPill
           label="Status"

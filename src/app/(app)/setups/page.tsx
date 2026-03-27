@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import type { SetupModel as Setup } from "@/generated/prisma/models/Setup";
 import { Plus, BookOpen, ChevronRight } from "lucide-react";
 import { NewSetupButton } from "@/components/ui/NewSetupButton";
+import { calculateSetupPerformance, type TradeMetrics } from "@/lib/utils/setup-stats";
 
 /* ─── Helpers ──────────────────────────────────────────────────────────── */
 function fmt(value: string | null | undefined, decimals = 2): string {
@@ -63,7 +64,14 @@ function EmptyState() {
   );
 }
 
-function SetupRow({ setup }: { setup: Setup }) {
+interface SetupRowProps {
+  setup: Setup;
+  trades: TradeMetrics[];
+}
+
+function SetupRow({ setup, trades }: SetupRowProps) {
+  const performance = calculateSetupPerformance(trades);
+
   return (
     <Link
       href={`/setups/${setup.id}`}
@@ -101,9 +109,14 @@ function SetupRow({ setup }: { setup: Setup }) {
           </p>
           <p
             className="text-sm font-bold tabular-nums"
-            style={{ color: setup.winRate != null ? "var(--accent-green-light)" : "var(--text-muted)" }}
+            style={{
+              color: performance.winRate != null ? "var(--accent-green-light)" : "var(--text-muted)",
+            }}
           >
-            {setup.winRate != null ? `${fmt(setup.winRate.toString())}%` : "—"}
+            {performance.winRate != null ? `${fmt(performance.winRate.toString())}%` : "—"}
+          </p>
+          <p className="mt-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
+            {performance.closedTrades} trades
           </p>
         </div>
         <div className="text-right">
@@ -114,14 +127,14 @@ function SetupRow({ setup }: { setup: Setup }) {
             className="text-sm font-bold tabular-nums"
             style={{
               color:
-                setup.avgRMultiple != null
-                  ? parseFloat(setup.avgRMultiple.toString()) >= 0
+                performance.avgRMultiple != null
+                  ? performance.avgRMultiple >= 0
                     ? "var(--accent-green-light)"
                     : "var(--accent-red)"
                   : "var(--text-muted)",
             }}
           >
-            {setup.avgRMultiple != null ? `${fmt(setup.avgRMultiple.toString(), 2)}R` : "—"}
+            {performance.avgRMultiple != null ? `${fmt(performance.avgRMultiple.toString(), 2)}R` : "—"}
           </p>
         </div>
       </div>
@@ -149,6 +162,16 @@ export default async function SetupsPage() {
   const setups = await prisma.setup.findMany({
     where: { userId: session.user.id },
     orderBy: { createdAt: "desc" },
+    include: {
+      trades: {
+        select: {
+          id: true,
+          outcome: true,
+          pnlNet: true,
+          rMultiple: true,
+        },
+      },
+    },
   });
 
   return (
@@ -214,7 +237,7 @@ export default async function SetupsPage() {
 
           {/* Rows */}
           {setups.map((setup) => (
-            <SetupRow key={setup.id} setup={setup} />
+            <SetupRow key={setup.id} setup={setup} trades={setup.trades} />
           ))}
         </div>
       )}
