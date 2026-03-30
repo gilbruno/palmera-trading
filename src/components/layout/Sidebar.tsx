@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { BookOpen, TrendingUp, BookMarked, Calculator, FlaskConical, Menu, X } from "lucide-react";
+import { BookOpen, TrendingUp, BookMarked, Calculator, FlaskConical, Menu, X, GraduationCap, ChevronDown, Layers } from "lucide-react";
 import { LogoutButton } from "@/components/ui/LogoutButton";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
@@ -56,6 +56,8 @@ const navItems: NavItem[] = [
 /* ─── Sidebar content (shared between desktop and mobile) ─────────────── */
 function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
   const pathname = usePathname();
+  const isLearningActive = pathname.startsWith("/learning");
+  const [learningOpen, setLearningOpen] = useState(isLearningActive);
 
   return (
     <div className="flex h-full flex-col">
@@ -150,6 +152,104 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
             );
           })}
         </ul>
+
+        {/* ── Learning section ───────────────────────────────────────────── */}
+        <div className="mt-3">
+          <div className="mx-2 mb-2 h-px" style={{ backgroundColor: "var(--border)" }} />
+          <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
+            Education
+          </p>
+
+          {/* Learning collapsible header */}
+          <button
+            type="button"
+            onClick={() => setLearningOpen((prev) => !prev)}
+            className={[
+              "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-150 outline-none",
+              "focus-visible:ring-2 focus-visible:ring-offset-1",
+              isLearningActive ? "font-medium" : "hover:bg-white/5",
+            ].join(" ")}
+            style={
+              isLearningActive
+                ? {
+                    backgroundColor: "rgba(129,140,248,0.12)",
+                    color: "#a5b4fc",
+                    "--tw-ring-color": "#818cf8",
+                  } as React.CSSProperties
+                : {
+                    color: "var(--text-secondary)",
+                    "--tw-ring-color": "#818cf8",
+                  } as React.CSSProperties
+            }
+          >
+            {/* Active indicator bar */}
+            {isLearningActive && (
+              <span
+                className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full"
+                style={{ backgroundColor: "#a5b4fc" }}
+              />
+            )}
+
+            <span
+              className="shrink-0 transition-colors duration-150"
+              style={{ color: isLearningActive ? "#a5b4fc" : "var(--text-muted)" }}
+            >
+              <GraduationCap size={16} strokeWidth={1.75} />
+            </span>
+
+            <span className="flex-1 text-left">Learning</span>
+
+            <span
+              className="shrink-0 transition-transform duration-200"
+              style={{
+                transform: learningOpen ? "rotate(0deg)" : "rotate(-90deg)",
+                color: isLearningActive ? "#a5b4fc" : "var(--text-muted)",
+              }}
+            >
+              <ChevronDown size={13} strokeWidth={2} />
+            </span>
+          </button>
+
+          {/* Submenu */}
+          <div
+            className="overflow-hidden transition-all duration-200"
+            style={{ maxHeight: learningOpen ? "120px" : "0px", opacity: learningOpen ? 1 : 0 }}
+          >
+            <ul className="mt-0.5 pl-3">
+              <li>
+                <Link
+                  href="/learning/ict-concepts"
+                  onClick={onNavClick}
+                  className={[
+                    "group relative flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-all duration-150 outline-none",
+                    "focus-visible:ring-2 focus-visible:ring-offset-1",
+                    pathname.startsWith("/learning/ict-concepts") ? "font-medium" : "hover:bg-white/5",
+                  ].join(" ")}
+                  style={
+                    pathname.startsWith("/learning/ict-concepts")
+                      ? {
+                          backgroundColor: "rgba(129,140,248,0.10)",
+                          color: "#a5b4fc",
+                          "--tw-ring-color": "#818cf8",
+                        } as React.CSSProperties
+                      : {
+                          color: "var(--text-secondary)",
+                          "--tw-ring-color": "#818cf8",
+                        } as React.CSSProperties
+                  }
+                >
+                  <span
+                    className="shrink-0"
+                    style={{ color: pathname.startsWith("/learning/ict-concepts") ? "#a5b4fc" : "var(--text-muted)" }}
+                  >
+                    <Layers size={13} strokeWidth={1.75} />
+                  </span>
+                  ICT Concepts
+                </Link>
+              </li>
+            </ul>
+          </div>
+        </div>
       </nav>
 
       {/* Footer */}
