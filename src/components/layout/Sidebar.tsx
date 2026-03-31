@@ -7,6 +7,7 @@ import { useState, useEffect, useRef } from "react";
 import { BookOpen, TrendingUp, BookMarked, Calculator, FlaskConical, Menu, X, GraduationCap, ChevronDown, Layers } from "lucide-react";
 import { LogoutButton } from "@/components/ui/LogoutButton";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { AdminNavItem } from "@/components/layout/AdminNavItem";
 
 interface NavItem {
   label: string;
@@ -250,6 +251,9 @@ function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
             </ul>
           </div>
         </div>
+
+        {/* ── Administration section (ADMIN only) ───────────────────────── */}
+        <AdminNavItem />
       </nav>
 
       {/* Footer */}

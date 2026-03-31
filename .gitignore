@@ -51,3 +51,6 @@ next-env.d.ts
 
 #Tools 
 /tools*
+
+#Settings AI
+.qwen/settings.json

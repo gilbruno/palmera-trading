@@ -33,7 +33,7 @@ model User {
   image         String?
   createdAt     DateTime
   updatedAt     DateTime
-  role          String    @default("user")
+  role          Role      @default(USER)
 
   sessions      Session[]
   accounts      Account[]
@@ -97,6 +97,11 @@ model Verification {
 // =============================================================================
 // ENUMS
 // =============================================================================
+
+enum Role {
+  USER
+  ADMIN
+}
 
 enum Direction {
   LONG
