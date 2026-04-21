@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { Calculator, AlertTriangle, TrendingUp, DollarSign, Target, Shield } from "lucide-react";
 
 /* ─── Types ────────────────────────────────────────────────────────────── */
-type InstrumentType = "forex" | "indices" | "stocks" | "crypto";
+type InstrumentType = "forex" | "indices" | "stocks" | "crypto" | "dxy";
 type ForexLotType = "standard" | "mini" | "micro";
 type Direction = "long" | "short";
 
@@ -20,6 +20,10 @@ interface Inputs {
 }
 
 /* ─── Constants ────────────────────────────────────────────────────────── */
+/* DXY.cash (FTMO MT5) — Spot CFD, contract size 100, tick 0.001, tick value $0.10/lot */
+const DXY_TICK_SIZE = 0.001;
+const DXY_TICK_VALUE_PER_LOT = 0.10; // USD per lot per tick
+
 const LOT_SIZES: Record<ForexLotType, number> = {
   standard: 100_000,
   mini: 10_000,
@@ -92,6 +96,14 @@ function calculate(inputs: Inputs) {
   } else if (inputs.instrumentType === "crypto") {
     positionSize = unitsRaw;
     positionLabel = "coins";
+    positionSizeRaw = positionSize;
+  } else if (inputs.instrumentType === "dxy") {
+    // DXY.cash — FTMO MT5 Spot CFD
+    // 1 pip = 0.001 (tick size); tick value = $0.10 / lot
+    // Lots = dollarRisk / (SL in pips × tickValue per pip per lot)
+    const slPips = stopDist / DXY_TICK_SIZE;
+    positionSize = dollarRisk / (slPips * DXY_TICK_VALUE_PER_LOT);
+    positionLabel = "lots";
     positionSizeRaw = positionSize;
   } else {
     // indices / CFD
@@ -377,8 +389,8 @@ export default function PositionSizePage() {
               <p className="mb-2 text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
                 Type
               </p>
-              <div className="grid grid-cols-4 gap-2">
-                {(["forex", "indices", "stocks", "crypto"] as InstrumentType[]).map((t) => (
+              <div className="grid grid-cols-5 gap-2">
+                {(["forex", "dxy", "indices", "stocks", "crypto"] as InstrumentType[]).map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -401,6 +413,21 @@ export default function PositionSizePage() {
                 ))}
               </div>
             </div>
+
+            {/* DXY.cash info */}
+            {inputs.instrumentType === "dxy" && (
+              <div
+                className="rounded-lg px-3 py-2 text-xs"
+                style={{
+                  backgroundColor: "rgba(255,214,0,0.08)",
+                  border: "1px solid rgba(255,214,0,0.2)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                <span className="font-semibold" style={{ color: "var(--accent-primary)" }}>DXY.cash</span>
+                {" "}· Contract 100 · Tick 0.001 · $0.10/lot/pip · Formula: Risk ÷ (SL pips × 0.10)
+              </div>
+            )}
 
             {/* Forex lot type */}
             {inputs.instrumentType === "forex" && (
@@ -450,17 +477,19 @@ export default function PositionSizePage() {
                 id="entry"
                 value={inputs.entryPrice}
                 onChange={set("entryPrice")}
-                placeholder="1.08500"
+                placeholder={inputs.instrumentType === "dxy" ? "104.500" : "1.08500"}
               />
               <InputField
                 label="Stop Loss"
                 id="sl"
                 value={inputs.stopLoss}
                 onChange={set("stopLoss")}
-                placeholder="1.08000"
+                placeholder={inputs.instrumentType === "dxy" ? "104.000" : "1.08000"}
                 hint={
                   result && !result.slValid
                     ? "⚠ SL direction mismatch"
+                    : result && inputs.instrumentType === "dxy"
+                    ? `${fmt(result.stopDist / DXY_TICK_SIZE, 1)} pips · ${fmt(result.stopDistPct, 3)}%`
                     : result
                     ? `${fmt(result.stopDist, 5)} pts · ${fmt(result.stopDistPct, 3)}%`
                     : undefined
@@ -501,14 +530,17 @@ export default function PositionSizePage() {
             {result ? (
               <>
                 <p className="text-4xl font-bold tabular-nums" style={{ color: "var(--accent-primary)" }}>
-                  {inputs.instrumentType === "forex"
-                    ? fmtCompact(result.positionSize)
-                    : inputs.instrumentType === "stocks"
+                  {inputs.instrumentType === "stocks"
                     ? fmt(result.positionSize, 0)
                     : fmtCompact(result.positionSize)}
                 </p>
                 <p className="mt-1 text-sm font-medium" style={{ color: "rgba(255,214,0,0.7)" }}>
                   {result.positionLabel}
+                  {inputs.instrumentType === "dxy" && (
+                    <span className="ml-2 text-xs" style={{ color: "var(--text-muted)" }}>
+                      · min 0.01 lot
+                    </span>
+                  )}
                 </p>
               </>
             ) : (
@@ -530,7 +562,13 @@ export default function PositionSizePage() {
           {/* Stop distance */}
           <ResultCard
             label="Stop Distance"
-            value={result ? fmtCompact(result.stopDist) : "—"}
+            value={
+              result
+                ? inputs.instrumentType === "dxy"
+                  ? `${fmt(result.stopDist / DXY_TICK_SIZE, 1)} pips`
+                  : fmtCompact(result.stopDist)
+                : "—"
+            }
             sub={result ? `${fmt(result.stopDistPct, 3)}% from entry` : undefined}
             accent="var(--accent-secondary)"
             icon={<Shield size={14} />}
