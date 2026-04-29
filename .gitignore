@@ -54,3 +54,9 @@ next-env.d.ts
 
 #Settings AI
 .qwen/settings.json
+
+#ICT Alarms
+/scripts/ict-killzone-alarm.sh
+/scripts/killzone-chime.wav
+/scripts/test-ict-alarm.sh
+/scripts/ICT-KILLZONE-ALARM.md

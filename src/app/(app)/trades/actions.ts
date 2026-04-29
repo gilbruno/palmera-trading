@@ -33,13 +33,18 @@ function getOptional(fd: FormData, key: string): string | null {
   return v.length > 0 ? v : null;
 }
 
+function normalizeDecimal(v: string): string {
+  // Accept both "1,16943" (French locale) and "1.16943" (standard)
+  return v.replace(",", ".");
+}
+
 function getFloat(fd: FormData, key: string, fallback: number): number {
-  const n = parseFloat(getString(fd, key));
+  const n = parseFloat(normalizeDecimal(getString(fd, key)));
   return isNaN(n) ? fallback : n;
 }
 
 function getOptionalFloat(fd: FormData, key: string): number | null {
-  const n = parseFloat(getString(fd, key));
+  const n = parseFloat(normalizeDecimal(getString(fd, key)));
   return isNaN(n) ? null : n;
 }
 
@@ -124,14 +129,20 @@ function extractFields(fd: FormData) {
     }
   }
 
+  // Contract size multiplier per asset class.
+  // FOREX: 1 standard lot = 100 000 units of base currency.
+  // STOCKS/CRYPTO/others: quantity already represents units directly (multiplier = 1).
+  const assetClass = getEnum(fd, "assetClass", ASSET_CLASSES);
+  const contractSize = assetClass === "FOREX" ? 100_000 : 1;
+
   // Auto-compute P&L gross if entry, exit and quantity are all present
   let pnlGross = getOptionalFloat(fd, "pnlGross");
   if (pnlGross === null && exitPrice !== null) {
-    const raw =
+    const priceDiff =
       directionRaw === "LONG"
-        ? (exitPrice - entryPriceRaw) * quantity
-        : (entryPriceRaw - exitPrice) * quantity;
-    pnlGross = raw;
+        ? exitPrice - entryPriceRaw
+        : entryPriceRaw - exitPrice;
+    pnlGross = priceDiff * quantity * contractSize;
   }
 
   const commission = getOptionalFloat(fd, "commission");
@@ -149,9 +160,14 @@ function extractFields(fd: FormData) {
 
   const gradeRaw = getOptionalFloat(fd, "qualityScore");
 
-  // Auto-determine outcome if not explicitly set but pnlNet is known
+  // Auto-determine outcome: R-multiple takes priority (more reliable for Forex lots),
+  // fall back to pnlNet sign, then keep explicit user value.
   let outcomeRaw = getEnum(fd, "outcome", OUTCOMES) as TradeOutcome | null;
-  if (!outcomeRaw && pnlNet !== null) {
+  if (rMultiple !== null) {
+    if (rMultiple > 0) outcomeRaw = "WIN";
+    else if (rMultiple < 0) outcomeRaw = "LOSS";
+    else outcomeRaw = "BREAKEVEN";
+  } else if (!outcomeRaw && pnlNet !== null) {
     if (pnlNet > 0) outcomeRaw = "WIN";
     else if (pnlNet < 0) outcomeRaw = "LOSS";
     else outcomeRaw = "BREAKEVEN";
