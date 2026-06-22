@@ -308,13 +308,37 @@ export function AddTradeForm({ backtestId, instrument }: { backtestId: string; i
   });
   const setSel = (key: string) => (v: string) => setSelects((prev) => ({ ...prev, [key]: v }));
   const [error, setError] = useState<string | null>(null);
+
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 16));
   const [exitDate, setExitDate] = useState("");
+  const [exitDateTouched, setExitDateTouched] = useState(false);
   // savedTradeId is set after the trade row is persisted; used by MediaUpload.
   const [savedTradeId, setSavedTradeId] = useState<string | null>(null);
   // tempMedia holds uploads done before the trade exists (tradeId="temp")
   const [tempMedia, setTempMedia] = useState<UploadedMedia[]>([]);
   const handleTempUploaded = useCallback((media: UploadedMedia[]) => setTempMedia(media), []);
+
+  function handleEntryDateChange(value: string) {
+    setEntryDate(value);
+    if (!exitDateTouched && value) {
+      const entryParts = value.slice(0, 7); // "YYYY-MM"
+      if (exitDate && exitDate.length >= 16) {
+        setExitDate(entryParts + exitDate.slice(7));
+      } else if (!exitDate) {
+        setExitDate(value);
+      }
+      // partial exitDate — leave it alone
+    }
+  }
+
+  function handleExitDateChange(value: string) {
+    if (!value) {
+      setExitDateTouched(false); // clearing re-enables auto-sync
+    } else {
+      setExitDateTouched(true);
+    }
+    setExitDate(value);
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -341,6 +365,7 @@ export function AddTradeForm({ backtestId, instrument }: { backtestId: string; i
         setSelects({ marketSession: "", timeframeEntry: "", timeframeTrend: "", liquiditySwept: "", biasHTF: "", biasMTF: "", marketStructure: "", ictModel: "", poi: "" });
         setEntryDate(new Date().toISOString().slice(0, 16));
         setExitDate("");
+        setExitDateTouched(false);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to add trade.");
       }
@@ -449,7 +474,7 @@ export function AddTradeForm({ backtestId, instrument }: { backtestId: string; i
               id="entryDate"
               name="entryDate"
               value={entryDate}
-              onChange={setEntryDate}
+              onChange={handleEntryDateChange}
               required
             />
           </div>
@@ -459,7 +484,7 @@ export function AddTradeForm({ backtestId, instrument }: { backtestId: string; i
               id="exitDate"
               name="exitDate"
               value={exitDate}
-              onChange={setExitDate}
+              onChange={handleExitDateChange}
               placeholder="Not closed yet"
             />
           </div>
