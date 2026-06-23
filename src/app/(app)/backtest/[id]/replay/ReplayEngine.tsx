@@ -176,6 +176,11 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
   const [modalOrderType, setModalOrderType] = useState<"MARKET" | "LIMIT" | "STOP">("MARKET");
   const [exitModal, setExitModal]           = useState<FilledTrade | null>(null);
   const [activeTradeId, setActiveTradeId]   = useState<string | null>(null);
+  const activeTradeIdRef = useRef<string | null>(null);
+  function setActiveTradeIdSynced(id: string | null) {
+    activeTradeIdRef.current = id;
+    setActiveTradeIdSynced(id);
+  }
   const [isSaving, setIsSaving]             = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -243,6 +248,10 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
 
   const handleTradeFilled = useCallback((trade: FilledTrade) => {
     engineRef.current?.pause();
+    // Screenshot taken here: chart shows all candles up to SL/TP, price lines still visible
+    if (activeTradeIdRef.current) {
+      void captureAndUploadScreenshot(activeTradeIdRef.current);
+    }
     setExitModal(trade);
   }, []);
 
@@ -257,7 +266,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
           takeProfit: order.takeProfit,
           entryDate:  new Date(activationBar.time * 1000),
         });
-        setActiveTradeId(id);
+        setActiveTradeIdSynced(id);
       } catch (err) {
         console.error("Failed to create trade on activation:", err);
       }
@@ -1121,7 +1130,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
           takeProfit: overlayState.tp,
           entryDate:  new Date(engine.currentBar.time * 1000),
         });
-        setActiveTradeId(id);
+        setActiveTradeIdSynced(id);
       }
 
       engine.placeOrder(order);
@@ -1151,8 +1160,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
         },
         notes
       );
-      void captureAndUploadScreenshot(activeTradeId);
-      setActiveTradeId(null);
+      setActiveTradeIdSynced(null);
       if (exitModalTimerRef.current) clearTimeout(exitModalTimerRef.current);
       exitModalTimerRef.current = setTimeout(() => setExitModal(null), 1800);
     } finally {
@@ -1653,7 +1661,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
                   takeProfit: correctedOrder.takeProfit,
                   entryDate:  new Date(engine.currentBar.time * 1000),
                 });
-                setActiveTradeId(id);
+                setActiveTradeIdSynced(id);
               } catch (err) {
                 console.error("Failed to create MARKET trade from OrderPanel:", err);
               }
