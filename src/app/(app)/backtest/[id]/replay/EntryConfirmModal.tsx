@@ -12,6 +12,7 @@ type OverlaySummary = {
 type Props = {
   overlayState: OverlaySummary;
   entryBar: Bar;
+  orderType: "MARKET" | "LIMIT" | "STOP";
   onConfirm: () => void;
   onCancel: () => void;
   isSaving: boolean;
@@ -20,12 +21,12 @@ type Props = {
 const fmtPrice = (n: number) => n.toFixed(5);
 const fmtDate  = (ts: number) => new Date(ts * 1000).toUTCString().slice(0, 22);
 
-export function EntryConfirmModal({ overlayState, entryBar, onConfirm, onCancel, isSaving }: Props) {
+export function EntryConfirmModal({ overlayState, entryBar, orderType, onConfirm, onCancel, isSaving }: Props) {
   const isLong = overlayState.direction === "LONG";
   const dirColor = isLong ? "#22c55e" : "#ef4444";
 
   const rows: [string, string][] = [
-    ["Direction",   overlayState.direction],
+    ["Type",        `${orderType} ${overlayState.direction}`],
     ["Entry Price", fmtPrice(overlayState.entry)],
     ["Stop Loss",   fmtPrice(overlayState.sl)],
     ["Take Profit", fmtPrice(overlayState.tp)],

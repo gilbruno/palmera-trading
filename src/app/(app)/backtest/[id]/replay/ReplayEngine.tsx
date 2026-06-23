@@ -173,6 +173,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
   const [showOrderPanel, setShowOrderPanel] = useState(false);
   const [vwapAnchorIndex, setVwapAnchorIndex] = useState<number | null>(null);
   const [entryModalOpen, setEntryModalOpen] = useState(false);
+  const [modalOrderType, setModalOrderType] = useState<"MARKET" | "LIMIT" | "STOP">("MARKET");
   const [exitModal, setExitModal]           = useState<FilledTrade | null>(null);
   const [activeTradeId, setActiveTradeId]   = useState<string | null>(null);
   const [isSaving, setIsSaving]             = useState(false);
@@ -848,7 +849,13 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
                 E {overlayState.entry.toFixed(5)} · SL {overlayState.sl.toFixed(5)} · TP {overlayState.tp.toFixed(5)}
               </span>
               <button
-                onClick={() => { engine.pause(); setEntryModalOpen(true); }}
+                onClick={() => {
+                  if (engine.currentBar) {
+                    setModalOrderType(inferOrderType(overlayState!.direction, overlayState!.entry, engine.currentBar.close));
+                  }
+                  engine.pause();
+                  setEntryModalOpen(true);
+                }}
                 className="cursor-pointer rounded-lg px-2 py-1 text-xs font-bold"
                 style={{ backgroundColor: "#6366f1", color: "#fff" }}
               >
@@ -1068,6 +1075,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
         <EntryConfirmModal
           overlayState={overlayState}
           entryBar={engine.currentBar}
+          orderType={modalOrderType}
           onConfirm={handleEntryConfirm}
           onCancel={() => { setEntryModalOpen(false); engine.play(); }}
           isSaving={isSaving}
