@@ -67,6 +67,14 @@ export async function updateReplayTrade(
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user?.id) redirect("/");
 
+  const trade = await prisma.backtestTrade.findUnique({
+    where: { id: tradeId },
+    select: { backtestId: true, backtest: { select: { userId: true } } },
+  });
+  if (!trade || trade.backtest.userId !== session.user.id) {
+    throw new Error("Unauthorized");
+  }
+
   await prisma.backtestTrade.update({
     where: { id: tradeId },
     data: {
@@ -79,10 +87,5 @@ export async function updateReplayTrade(
     },
   });
 
-  // Récupérer le backtestId pour revalidatePath
-  const trade = await prisma.backtestTrade.findUnique({
-    where: { id: tradeId },
-    select: { backtestId: true },
-  });
-  if (trade) revalidatePath(`/backtest/${trade.backtestId}`);
+  revalidatePath(`/backtest/${trade.backtestId}`);
 }

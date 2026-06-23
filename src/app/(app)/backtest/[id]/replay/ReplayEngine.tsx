@@ -28,7 +28,7 @@ import { getSessionBands, calcIBRange, calcVwap, type SessionBand } from "./indi
 import { OrderOverlay, type OrderOverlayState, type DragTarget } from "./OrderOverlay";
 import { OrderPanel } from "./OrderPanel";
 import { TradeResultModal } from "./TradeResultModal";
-import { createReplayTrade } from "./actions";
+import { createReplayTrade, updateReplayTrade } from "./actions";
 import Link from "next/link";
 import { ArrowLeft, Maximize2, Minimize2, TrendingUp, TrendingDown, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -599,7 +599,24 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
     if (!pendingTrade) return;
     setIsSaving(true);
     try {
-      await createReplayTrade(backtestId, pendingTrade, notes);
+      const entry = {
+        direction: pendingTrade.order.direction,
+        entryPrice: pendingTrade.order.entryPrice,
+        stopLoss: pendingTrade.order.stopLoss,
+        takeProfit: pendingTrade.order.takeProfit,
+        entryDate: new Date(pendingTrade.entryBar.time * 1000),
+      };
+      const tradeId = await createReplayTrade(backtestId, entry);
+
+      const exit = {
+        exitPrice: pendingTrade.exitPrice,
+        exitDate: new Date(pendingTrade.exitBar.time * 1000),
+        outcome: pendingTrade.outcome,
+        rMultiple: pendingTrade.rMultiple,
+        pnlPoints: pendingTrade.pnlPoints,
+      };
+      await updateReplayTrade(tradeId, exit, notes);
+
       setPendingTrade(null);
     } finally {
       setIsSaving(false);
