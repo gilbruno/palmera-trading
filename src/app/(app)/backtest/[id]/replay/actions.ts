@@ -5,12 +5,26 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
-import type { FilledTrade } from "./useReplayEngine";
+
+export type TradeEntry = {
+  direction: "LONG" | "SHORT";
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  entryDate: Date;
+};
+
+export type TradeExit = {
+  exitPrice: number;
+  exitDate: Date;
+  outcome: "WIN" | "LOSS";
+  rMultiple: number;
+  pnlPoints: number;
+};
 
 export async function createReplayTrade(
   backtestId: string,
-  trade: FilledTrade,
-  notes: string
+  entry: TradeEntry
 ): Promise<string> {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user?.id) redirect("/");
@@ -31,21 +45,44 @@ export async function createReplayTrade(
     data: {
       backtestId,
       tradeNumber,
-      direction:    trade.order.direction,
-      outcome:      trade.outcome,
-      entryDate:    new Date(trade.entryBar.time * 1000),
-      exitDate:     new Date(trade.exitBar.time * 1000),
-      entryPrice:   trade.order.entryPrice,
-      exitPrice:    trade.exitPrice,
-      stopLoss:     trade.order.stopLoss,
-      takeProfit:   trade.order.takeProfit,
-      rMultiple:    trade.rMultiple,
-      pnlPoints:    trade.pnlPoints,
-      notes:        notes.trim() || null,
+      direction:  entry.direction,
+      entryDate:  entry.entryDate,
+      entryPrice: entry.entryPrice,
+      stopLoss:   entry.stopLoss,
+      takeProfit: entry.takeProfit,
+      // exit fields left null — filled in by updateReplayTrade
     },
     select: { id: true },
   });
 
   revalidatePath(`/backtest/${backtestId}`);
   return created.id;
+}
+
+export async function updateReplayTrade(
+  tradeId: string,
+  exit: TradeExit,
+  notes: string
+): Promise<void> {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user?.id) redirect("/");
+
+  await prisma.backtestTrade.update({
+    where: { id: tradeId },
+    data: {
+      exitDate:  exit.exitDate,
+      exitPrice: exit.exitPrice,
+      outcome:   exit.outcome,
+      rMultiple: exit.rMultiple,
+      pnlPoints: exit.pnlPoints,
+      notes:     notes.trim() || null,
+    },
+  });
+
+  // Récupérer le backtestId pour revalidatePath
+  const trade = await prisma.backtestTrade.findUnique({
+    where: { id: tradeId },
+    select: { backtestId: true },
+  });
+  if (trade) revalidatePath(`/backtest/${trade.backtestId}`);
 }
