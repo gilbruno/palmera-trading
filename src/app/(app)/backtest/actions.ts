@@ -5,10 +5,22 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
+import { S3Client, DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import {
   BacktestStatus, Direction, TradeOutcome, Timeframe,
   MarketSession, IctModel, PoiType, MarketBias, MarketStructure, LiquidityType,
 } from "@/generated/prisma/enums";
+
+function getR2Client(): S3Client {
+  return new S3Client({
+    region: "auto",
+    endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+    },
+  });
+}
 
 /* ─── Auth ──────────────────────────────────────────────────────────────── */
 async function requireUserId(): Promise<string> {
@@ -330,6 +342,25 @@ export async function deleteBacktestTrade(
     select: { id: true },
   });
   if (!backtest) throw new Error("Backtest not found.");
+
+  // Delete R2 objects before cascading DB delete
+  const media = await prisma.backtestTradeMedia.findMany({
+    where: { tradeId },
+    select: { storageKey: true },
+  });
+  if (media.length > 0) {
+    const bucket = process.env.R2_BUCKET_NAME;
+    if (bucket) {
+      try {
+        await getR2Client().send(new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: { Objects: media.map((m) => ({ Key: m.storageKey })) },
+        }));
+      } catch (err) {
+        console.error("[deleteBacktestTrade] R2 cleanup failed:", err);
+      }
+    }
+  }
 
   await prisma.backtestTrade.delete({ where: { id: tradeId } });
 
