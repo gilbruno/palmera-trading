@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 export type Bar = {
-  time: number; // Unix secondes UTC
+  time: number;
   open: number;
   high: number;
   low: number;
@@ -11,11 +11,15 @@ export type Bar = {
   volume: number;
 };
 
+export type OrderType = "MARKET" | "LIMIT" | "STOP";
+
 export type PendingOrder = {
   direction: "LONG" | "SHORT";
+  orderType: OrderType;
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
+  placedAtIndex: number;
   entryBarIndex: number;
 };
 
@@ -31,36 +35,71 @@ export type FilledTrade = {
 
 type UseReplayEngineOpts = {
   onTradeFilled: (trade: FilledTrade) => void;
+  onOrderActivated?: (order: PendingOrder, activationBar: Bar) => void;
 };
 
 const MIN_START_INDEX = 50;
 
 export function useReplayEngine(
   bars: Bar[],
-  { onTradeFilled }: UseReplayEngineOpts
+  { onTradeFilled, onOrderActivated }: UseReplayEngineOpts
 ) {
   const [currentIndex, setCurrentIndex] = useState(MIN_START_INDEX);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
+  const [activeOrder, setActiveOrder] = useState<PendingOrder | null>(null);
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const pendingOrderRef = useRef<PendingOrder | null>(null);
+  const activeOrderRef = useRef<PendingOrder | null>(null);
   pendingOrderRef.current = pendingOrder;
+  activeOrderRef.current = activeOrder;
+
+  const onOrderActivatedRef = useRef(onOrderActivated);
+  onOrderActivatedRef.current = onOrderActivated;
 
   const visibleBars = bars.slice(0, currentIndex + 1);
   const currentBar = bars[currentIndex] ?? null;
 
-  // Reset position when bars array changes (TF switch)
   useEffect(() => {
     setCurrentIndex(MIN_START_INDEX);
     setIsPlaying(false);
     setPendingOrder(null);
+    setActiveOrder(null);
   }, [bars]);
 
-  const checkOrderFill = useCallback(
-    (bar: Bar) => {
+  const checkOrderActivation = useCallback(
+    (bar: Bar, index: number) => {
       const order = pendingOrderRef.current;
+      if (!order || order.orderType === "MARKET") return;
+
+      const { direction, orderType, entryPrice } = order;
+      let activated = false;
+
+      if (direction === "LONG") {
+        activated = orderType === "LIMIT"
+          ? bar.low <= entryPrice
+          : bar.high >= entryPrice; // STOP
+      } else {
+        activated = orderType === "LIMIT"
+          ? bar.high >= entryPrice
+          : bar.low <= entryPrice; // STOP
+      }
+
+      if (!activated) return;
+
+      const activatedOrder: PendingOrder = { ...order, entryBarIndex: index };
+      setPendingOrder(null);
+      setActiveOrder(activatedOrder);
+      onOrderActivatedRef.current?.(activatedOrder, bar);
+    },
+    []
+  );
+
+  const checkOrderExit = useCallback(
+    (bar: Bar) => {
+      const order = activeOrderRef.current;
       if (!order) return;
 
       const { direction, entryPrice, stopLoss, takeProfit } = order;
@@ -68,34 +107,22 @@ export function useReplayEngine(
       let outcome: "WIN" | "LOSS" | null = null;
 
       if (direction === "LONG") {
-        if (bar.low <= stopLoss) {
-          exitPrice = stopLoss;
-          outcome = "LOSS";
-        } else if (bar.high >= takeProfit) {
-          exitPrice = takeProfit;
-          outcome = "WIN";
-        }
+        if (bar.low <= stopLoss) { exitPrice = stopLoss; outcome = "LOSS"; }
+        else if (bar.high >= takeProfit) { exitPrice = takeProfit; outcome = "WIN"; }
       } else {
-        if (bar.high >= stopLoss) {
-          exitPrice = stopLoss;
-          outcome = "LOSS";
-        } else if (bar.low <= takeProfit) {
-          exitPrice = takeProfit;
-          outcome = "WIN";
-        }
+        if (bar.high >= stopLoss) { exitPrice = stopLoss; outcome = "LOSS"; }
+        else if (bar.low <= takeProfit) { exitPrice = takeProfit; outcome = "WIN"; }
       }
 
       if (exitPrice === null || outcome === null) return;
 
       const risk = Math.abs(entryPrice - stopLoss);
-      const rMultiple =
-        direction === "LONG"
-          ? (exitPrice - entryPrice) / risk
-          : (entryPrice - exitPrice) / risk;
-      const pnlPoints =
-        direction === "LONG"
-          ? exitPrice - entryPrice
-          : entryPrice - exitPrice;
+      const rMultiple = direction === "LONG"
+        ? (exitPrice - entryPrice) / risk
+        : (entryPrice - exitPrice) / risk;
+      const pnlPoints = direction === "LONG"
+        ? exitPrice - entryPrice
+        : entryPrice - exitPrice;
 
       const filled: FilledTrade = {
         order,
@@ -107,7 +134,7 @@ export function useReplayEngine(
         pnlPoints: Math.round(pnlPoints * 10000) / 10000,
       };
 
-      setPendingOrder(null);
+      setActiveOrder(null);
       onTradeFilled(filled);
     },
     [bars, onTradeFilled]
@@ -116,33 +143,47 @@ export function useReplayEngine(
   const stepForward = useCallback(() => {
     setCurrentIndex((prev) => {
       const next = Math.min(prev + 1, bars.length - 1);
-      if (next !== prev) checkOrderFill(bars[next]);
+      if (next !== prev) {
+        checkOrderActivation(bars[next], next);
+        checkOrderExit(bars[next]);
+      }
       return next;
     });
-  }, [bars, checkOrderFill]);
+  }, [bars, checkOrderActivation, checkOrderExit]);
 
   const stepBackward = useCallback(() => {
     setCurrentIndex((prev) => Math.max(prev - 1, MIN_START_INDEX));
     setPendingOrder(null);
+    setActiveOrder(null);
   }, []);
 
   const jumpTo = useCallback(
     (index: number) => {
-      setCurrentIndex(
-        Math.max(MIN_START_INDEX, Math.min(index, bars.length - 1))
-      );
+      setCurrentIndex(Math.max(MIN_START_INDEX, Math.min(index, bars.length - 1)));
       setPendingOrder(null);
+      setActiveOrder(null);
     },
     [bars.length]
   );
 
   const play = useCallback(() => setIsPlaying(true), []);
   const pause = useCallback(() => setIsPlaying(false), []);
-  const placeOrder = useCallback(
-    (order: PendingOrder) => setPendingOrder(order),
-    []
-  );
-  const cancelOrder = useCallback(() => setPendingOrder(null), []);
+
+  const placeOrder = useCallback((order: PendingOrder) => {
+    if (order.orderType === "MARKET") {
+      setActiveOrder(order);
+    } else {
+      setPendingOrder(order);
+    }
+  }, []);
+
+  const activateOrder = useCallback((order: PendingOrder) => {
+    setPendingOrder(null);
+    setActiveOrder(order);
+  }, []);
+
+  const cancelPendingOrder = useCallback(() => setPendingOrder(null), []);
+  const cancelActiveOrder = useCallback(() => setActiveOrder(null), []);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -162,6 +203,7 @@ export function useReplayEngine(
     isPlaying,
     speed,
     pendingOrder,
+    activeOrder,
     play,
     pause,
     stepForward,
@@ -169,6 +211,8 @@ export function useReplayEngine(
     jumpTo,
     setSpeed,
     placeOrder,
-    cancelOrder,
+    activateOrder,
+    cancelPendingOrder,
+    cancelActiveOrder,
   };
 }
