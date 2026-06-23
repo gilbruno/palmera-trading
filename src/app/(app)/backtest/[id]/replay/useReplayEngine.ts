@@ -59,6 +59,9 @@ export function useReplayEngine(
   const onOrderActivatedRef = useRef(onOrderActivated);
   onOrderActivatedRef.current = onOrderActivated;
 
+  // Pending activation fired AFTER state commits (Finding #2: avoid async in state updater)
+  const pendingActivationRef = useRef<{ order: PendingOrder; bar: Bar } | null>(null);
+
   const visibleBars = bars.slice(0, currentIndex + 1);
   const currentBar = bars[currentIndex] ?? null;
 
@@ -68,6 +71,15 @@ export function useReplayEngine(
     setPendingOrder(null);
     setActiveOrder(null);
   }, [bars]);
+
+  // Fire the onOrderActivated callback AFTER React has committed state (Finding #2).
+  // activeOrder is listed as dependency so this runs when activation commits.
+  useEffect(() => {
+    const activation = pendingActivationRef.current;
+    if (!activation) return;
+    pendingActivationRef.current = null;
+    onOrderActivatedRef.current?.(activation.order, activation.bar);
+  }, [activeOrder]);
 
   const checkOrderActivation = useCallback(
     (bar: Bar, index: number) => {
@@ -90,9 +102,12 @@ export function useReplayEngine(
       if (!activated) return;
 
       const activatedOrder: PendingOrder = { ...order, entryBarIndex: index };
+      // Update ref immediately so checkOrderExit can read it in the same tick (Finding #3)
+      activeOrderRef.current = activatedOrder;
       setPendingOrder(null);
       setActiveOrder(activatedOrder);
-      onOrderActivatedRef.current?.(activatedOrder, bar);
+      // Store activation for deferred callback — fires after state commits (Finding #2)
+      pendingActivationRef.current = { order: activatedOrder, bar };
     },
     []
   );

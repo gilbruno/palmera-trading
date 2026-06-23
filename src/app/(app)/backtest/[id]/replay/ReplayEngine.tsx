@@ -850,9 +850,8 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
               </span>
               <button
                 onClick={() => {
-                  if (engine.currentBar) {
-                    setModalOrderType(inferOrderType(overlayState!.direction, overlayState!.entry, engine.currentBar.close));
-                  }
+                  if (!overlayState || !engine.currentBar) return;
+                  setModalOrderType(inferOrderType(overlayState.direction, overlayState.entry, engine.currentBar.close));
                   engine.pause();
                   setEntryModalOpen(true);
                 }}
@@ -1061,8 +1060,29 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
         <OrderPanel
           currentPrice={currentPrice}
           currentBarIndex={engine.currentIndex}
-          onConfirm={(order) => {
-            engine.placeOrder(order);
+          onConfirm={async (order) => {
+            if (!engine.currentBar) {
+              setShowOrderPanel(false);
+              return;
+            }
+            const inferredType = inferOrderType(order.direction, order.entryPrice, engine.currentBar.close);
+            const correctedOrder = { ...order, orderType: inferredType };
+            if (inferredType === "MARKET") {
+              try {
+                const id = await createReplayTrade(backtestId, {
+                  direction:  correctedOrder.direction,
+                  orderType:  "MARKET",
+                  entryPrice: correctedOrder.entryPrice,
+                  stopLoss:   correctedOrder.stopLoss,
+                  takeProfit: correctedOrder.takeProfit,
+                  entryDate:  new Date(engine.currentBar.time * 1000),
+                });
+                setActiveTradeId(id);
+              } catch (err) {
+                console.error("Failed to create MARKET trade from OrderPanel:", err);
+              }
+            }
+            engine.placeOrder(correctedOrder);
             setShowOrderPanel(false);
             engine.play();
           }}
