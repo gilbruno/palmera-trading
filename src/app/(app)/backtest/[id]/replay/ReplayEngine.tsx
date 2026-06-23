@@ -23,7 +23,7 @@ import {
   LineStyle,
   TickMarkType,
 } from "lightweight-charts";
-import { useReplayEngine, type Bar, type FilledTrade } from "./useReplayEngine";
+import { useReplayEngine, type Bar, type FilledTrade, type PendingOrder } from "./useReplayEngine";
 import { getSessionBands, calcIBRange, calcVwap, type SessionBand } from "./indicators";
 import { OrderOverlay, type OrderOverlayState, type DragTarget } from "./OrderOverlay";
 import { OrderPanel } from "./OrderPanel";
@@ -105,6 +105,17 @@ class SessionsPrimitive implements IPanePrimitiveBase<PaneAttachedParameter<Time
 }
 
 // ---------------------------------------------------------------------------
+function inferOrderType(
+  direction: "LONG" | "SHORT",
+  entryPrice: number,
+  currentClose: number
+): "MARKET" | "LIMIT" | "STOP" {
+  if (entryPrice === currentClose) return "MARKET";
+  if (direction === "LONG") return entryPrice < currentClose ? "LIMIT" : "STOP";
+  return entryPrice > currentClose ? "LIMIT" : "STOP";
+}
+
+// ---------------------------------------------------------------------------
 const TF_BAR_SPACING: Record<string, number> = { m1: 2, m5: 3, m15: 4, h1: 6, h4: 10 };
 
 function tfTickMarkFormatter(time: Time, tickMarkType: TickMarkType, locale: string): string {
@@ -174,6 +185,8 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
   const overlayStateRef = useRef<OrderOverlayState | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const watermarkRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pendingPriceLineRef = useRef<any>(null);
 
   // Crosshair OHLC hover display
   type HoverOhlc = { time: number; open: number; high: number; low: number; close: number } | null;
@@ -202,10 +215,29 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
     setExitModal(trade);
   }, []);
 
+  const handleOrderActivated = useCallback(
+    async (order: PendingOrder, activationBar: Bar) => {
+      try {
+        const id = await createReplayTrade(backtestId, {
+          direction:  order.direction,
+          orderType:  order.orderType,
+          entryPrice: order.entryPrice,
+          stopLoss:   order.stopLoss,
+          takeProfit: order.takeProfit,
+          entryDate:  new Date(activationBar.time * 1000),
+        });
+        setActiveTradeId(id);
+      } catch (err) {
+        console.error("Failed to create trade on activation:", err);
+      }
+    },
+    [backtestId]
+  );
+
   // Keep barsRef in sync for use inside the click closure
   useEffect(() => { barsRef.current = bars; }, [bars]);
 
-  const engine = useReplayEngine(bars, { onTradeFilled: handleTradeFilled });
+  const engine = useReplayEngine(bars, { onTradeFilled: handleTradeFilled, onOrderActivated: handleOrderActivated });
   // Sync engineRef so handleTradeFilled always accesses the latest engine instance.
   engineRef.current = engine;
 
@@ -514,6 +546,10 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
       chartEl.removeEventListener("pointercancel", onCapturePointerUp,    { capture: true });
       document.body.style.cursor = "";
       chart.unsubscribeCrosshairMove(onCrosshairMove);
+      if (pendingPriceLineRef.current && seriesRef.current) {
+        try { seriesRef.current.removePriceLine(pendingPriceLineRef.current); } catch {}
+        pendingPriceLineRef.current = null;
+      }
       chart.remove();
       if (exitModalTimerRef.current) clearTimeout(exitModalTimerRef.current);
     };
@@ -608,25 +644,63 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
 
   }, [engine.visibleBars]);
 
+  // Manage pending order price line
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series) return;
+
+    if (pendingPriceLineRef.current) {
+      try { series.removePriceLine(pendingPriceLineRef.current); } catch {}
+      pendingPriceLineRef.current = null;
+    }
+
+    if (engine.pendingOrder) {
+      const { direction, orderType, entryPrice } = engine.pendingOrder;
+      const label = `${orderType} ${direction} @ ${entryPrice.toFixed(5)}`;
+      pendingPriceLineRef.current = series.createPriceLine({
+        price: entryPrice,
+        color: "#6366f1",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: label,
+      });
+    }
+  }, [engine.pendingOrder]);
+
   async function handleEntryConfirm() {
     if (!overlayState || !engine.currentBar) return;
     setIsSaving(true);
     try {
-      const id = await createReplayTrade(backtestId, {
-        direction:  overlayState.direction,
-        entryPrice: overlayState.entry,
-        stopLoss:   overlayState.sl,
-        takeProfit: overlayState.tp,
-        entryDate:  new Date(engine.currentBar.time * 1000),
-      });
-      setActiveTradeId(id);
-      engine.placeOrder({
+      const inferredType = inferOrderType(
+        overlayState.direction,
+        overlayState.entry,
+        engine.currentBar.close
+      );
+
+      const order: PendingOrder = {
         direction:     overlayState.direction,
+        orderType:     inferredType,
         entryPrice:    overlayState.entry,
         stopLoss:      overlayState.sl,
         takeProfit:    overlayState.tp,
+        placedAtIndex: engine.currentIndex,
         entryBarIndex: engine.currentIndex,
-      });
+      };
+
+      if (inferredType === "MARKET") {
+        const id = await createReplayTrade(backtestId, {
+          direction:  overlayState.direction,
+          orderType:  "MARKET",
+          entryPrice: overlayState.entry,
+          stopLoss:   overlayState.sl,
+          takeProfit: overlayState.tp,
+          entryDate:  new Date(engine.currentBar.time * 1000),
+        });
+        setActiveTradeId(id);
+      }
+
+      engine.placeOrder(order);
       overlayStateRef.current = null;
       setOverlayState(null);
       orderOverlayRef.current?.clear();
@@ -764,6 +838,12 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
           {/* Confirm / Cancel when overlay placed */}
           {overlayState && (
             <>
+              <span className="text-xs font-mono rounded px-1.5 py-0.5 font-bold"
+                style={{ backgroundColor: "#312e81", color: "#a5b4fc" }}>
+                {engine.currentBar
+                  ? `${inferOrderType(overlayState.direction, overlayState.entry, engine.currentBar.close)} ${overlayState.direction}`
+                  : overlayState.direction}
+              </span>
               <span className="text-xs font-mono" style={{ color: "#6b7280" }}>
                 E {overlayState.entry.toFixed(5)} · SL {overlayState.sl.toFixed(5)} · TP {overlayState.tp.toFixed(5)}
               </span>
@@ -785,6 +865,21 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
                 style={{ backgroundColor: "#1f2937", color: "#9ca3af" }}
               >
                 <X size={11} />
+              </button>
+            </>
+          )}
+          {engine.pendingOrder && !overlayState && (
+            <>
+              <span className="text-xs font-mono rounded px-1.5 py-0.5 font-bold animate-pulse"
+                style={{ backgroundColor: "#312e81", color: "#a5b4fc" }}>
+                ⏳ {engine.pendingOrder.orderType} {engine.pendingOrder.direction} @ {engine.pendingOrder.entryPrice.toFixed(5)}
+              </span>
+              <button
+                onClick={() => engine.cancelPendingOrder()}
+                className="cursor-pointer rounded-lg px-2 py-1 text-xs font-bold"
+                style={{ backgroundColor: "#374151", color: "#f87171" }}
+              >
+                Annuler l&apos;ordre
               </button>
             </>
           )}
@@ -853,11 +948,11 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
               engine.pause();
               setShowOrderPanel(true);
             }}
-            disabled={!!engine.pendingOrder}
+            disabled={!!engine.pendingOrder || !!engine.activeOrder}
             className="cursor-pointer rounded-xl px-4 py-1.5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
             style={{ backgroundColor: "#6366f1", color: "#fff" }}
           >
-            {engine.pendingOrder ? "Order Active" : "+ Order"}
+            {engine.pendingOrder || engine.activeOrder ? "Order Active" : "+ Order"}
           </button>
 
           {/* Fullscreen toggle */}
@@ -955,7 +1050,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
       </div>
 
       {/* Order panel */}
-      {showOrderPanel && !engine.pendingOrder && (
+      {showOrderPanel && !engine.pendingOrder && !engine.activeOrder && (
         <OrderPanel
           currentPrice={currentPrice}
           currentBarIndex={engine.currentIndex}

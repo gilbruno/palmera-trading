@@ -22,7 +22,7 @@ export function OrderPanel({ currentPrice, currentBarIndex, onConfirm, onCancel 
     const sl = parseFloat(stopLoss);
     const tp = parseFloat(takeProfit);
     if (isNaN(ep) || isNaN(sl) || isNaN(tp)) return;
-    onConfirm({ direction, entryPrice: ep, stopLoss: sl, takeProfit: tp, entryBarIndex: currentBarIndex });
+    onConfirm({ direction, orderType: "MARKET", entryPrice: ep, stopLoss: sl, takeProfit: tp, placedAtIndex: currentBarIndex, entryBarIndex: currentBarIndex });
   }
 
   return (
