@@ -29,7 +29,7 @@ import { OrderOverlay, type OrderOverlayState, type DragTarget } from "./OrderOv
 import { OrderPanel } from "./OrderPanel";
 import { EntryConfirmModal } from "./EntryConfirmModal";
 import { ExitConfirmModal } from "./ExitConfirmModal";
-import { createReplayTrade, updateReplayTrade } from "./actions";
+import { createReplayTrade, updateReplayTrade, updateOrderLevels } from "./actions";
 import Link from "next/link";
 import { ArrowLeft, Maximize2, Minimize2, TrendingUp, TrendingDown, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -188,6 +188,36 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
   const watermarkRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingPriceLineRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const slPriceLineRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tpPriceLineRef = useRef<any>(null);
+  // Price lines kept alive once order is active (entry activated → stays until fill)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const activeSlPriceLineRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const activeTpPriceLineRef = useRef<any>(null);
+
+  // Snapshot refs for stale-closure-safe reads in pointer handlers
+  const pendingOrderSnapshot = useRef<PendingOrder | null>(null);
+  const activeOrderSnapshot  = useRef<PendingOrder | null>(null);
+
+  // Drag-modify state: tracks which price level is being dragged
+  type DragModify = { target: "sl" | "tp"; originalValue: number; draftValue: number } | null;
+  const [dragModify, setDragModify] = useState<DragModify>(null);
+  const dragModifyRef = useRef<DragModify>(null);
+
+  // Pending confirmation after drag ends
+  type PendingModification = { target: "sl" | "tp"; oldValue: number; newValue: number } | null;
+  const [pendingModification, setPendingModification] = useState<PendingModification>(null);
+
+  // rAF loop handle for repositioning DOM overlays
+  const overlayRafRef = useRef<number | null>(null);
+
+  // DOM refs for the floating overlays
+  const cancelBtnRef = useRef<HTMLDivElement>(null);
+  const slHandleRef  = useRef<HTMLDivElement>(null);
+  const tpHandleRef  = useRef<HTMLDivElement>(null);
 
   // Crosshair OHLC hover display
   type HoverOhlc = { time: number; open: number; high: number; low: number; close: number } | null;
@@ -241,6 +271,10 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
   const engine = useReplayEngine(bars, { onTradeFilled: handleTradeFilled, onOrderActivated: handleOrderActivated });
   // Sync engineRef so handleTradeFilled always accesses the latest engine instance.
   engineRef.current = engine;
+
+  // Keep snapshot refs in sync every render (for stale-closure-safe pointer handlers)
+  pendingOrderSnapshot.current = engine.pendingOrder;
+  activeOrderSnapshot.current  = engine.activeOrder;
 
   const router = useRouter();
 
@@ -551,6 +585,22 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
         try { seriesRef.current.removePriceLine(pendingPriceLineRef.current); } catch {}
         pendingPriceLineRef.current = null;
       }
+      if (slPriceLineRef.current && seriesRef.current) {
+        try { seriesRef.current.removePriceLine(slPriceLineRef.current); } catch {}
+        slPriceLineRef.current = null;
+      }
+      if (tpPriceLineRef.current && seriesRef.current) {
+        try { seriesRef.current.removePriceLine(tpPriceLineRef.current); } catch {}
+        tpPriceLineRef.current = null;
+      }
+      if (activeSlPriceLineRef.current && seriesRef.current) {
+        try { seriesRef.current.removePriceLine(activeSlPriceLineRef.current); } catch {}
+        activeSlPriceLineRef.current = null;
+      }
+      if (activeTpPriceLineRef.current && seriesRef.current) {
+        try { seriesRef.current.removePriceLine(activeTpPriceLineRef.current); } catch {}
+        activeTpPriceLineRef.current = null;
+      }
       chart.remove();
       if (exitModalTimerRef.current) clearTimeout(exitModalTimerRef.current);
     };
@@ -645,29 +695,376 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
 
   }, [engine.visibleBars]);
 
-  // Manage pending order price line
+  // Pending order: show entry + SL + TP lines while waiting for activation
   useEffect(() => {
     const series = seriesRef.current;
     if (!series) return;
 
+    // Always clear the pending entry line
     if (pendingPriceLineRef.current) {
       try { series.removePriceLine(pendingPriceLineRef.current); } catch {}
       pendingPriceLineRef.current = null;
     }
 
     if (engine.pendingOrder) {
-      const { direction, orderType, entryPrice } = engine.pendingOrder;
-      const label = `${orderType} ${direction} @ ${entryPrice.toFixed(5)}`;
+      // Pending: show all three lines; SL/TP will stay when order activates (via activeOrder effect)
+      const { direction, orderType, entryPrice, stopLoss, takeProfit } = engine.pendingOrder;
       pendingPriceLineRef.current = series.createPriceLine({
         price: entryPrice,
         color: "#6366f1",
         lineWidth: 1,
         lineStyle: 2,
         axisLabelVisible: true,
-        title: label,
+        title: `${orderType} ${direction} @ ${entryPrice.toFixed(5)}`,
       });
+      // Create SL/TP into the pending refs — activeOrder effect will re-create them into active refs
+      if (slPriceLineRef.current) {
+        try { series.removePriceLine(slPriceLineRef.current); } catch {}
+        slPriceLineRef.current = null;
+      }
+      if (tpPriceLineRef.current) {
+        try { series.removePriceLine(tpPriceLineRef.current); } catch {}
+        tpPriceLineRef.current = null;
+      }
+      slPriceLineRef.current = series.createPriceLine({
+        price: stopLoss,
+        color: "#ef4444",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: `SL @ ${stopLoss.toFixed(5)}`,
+      });
+      tpPriceLineRef.current = series.createPriceLine({
+        price: takeProfit,
+        color: "#22c55e",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: `TP @ ${takeProfit.toFixed(5)}`,
+      });
+    } else {
+      // No pending order: clear pending SL/TP (active ones managed by activeOrder effect)
+      if (slPriceLineRef.current) {
+        try { series.removePriceLine(slPriceLineRef.current); } catch {}
+        slPriceLineRef.current = null;
+      }
+      if (tpPriceLineRef.current) {
+        try { series.removePriceLine(tpPriceLineRef.current); } catch {}
+        tpPriceLineRef.current = null;
+      }
     }
   }, [engine.pendingOrder]);
+
+  // Active order: keep SL + TP lines visible until the trade is filled
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series) return;
+
+    if (engine.activeOrder) {
+      // Clear pending SL/TP refs (they'll be replaced by active ones below)
+      if (slPriceLineRef.current) {
+        try { series.removePriceLine(slPriceLineRef.current); } catch {}
+        slPriceLineRef.current = null;
+      }
+      if (tpPriceLineRef.current) {
+        try { series.removePriceLine(tpPriceLineRef.current); } catch {}
+        tpPriceLineRef.current = null;
+      }
+      // Clear previous active lines (order replaced)
+      if (activeSlPriceLineRef.current) {
+        try { series.removePriceLine(activeSlPriceLineRef.current); } catch {}
+      }
+      if (activeTpPriceLineRef.current) {
+        try { series.removePriceLine(activeTpPriceLineRef.current); } catch {}
+      }
+      const { stopLoss, takeProfit } = engine.activeOrder;
+      activeSlPriceLineRef.current = series.createPriceLine({
+        price: stopLoss,
+        color: "#ef4444",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: `SL @ ${stopLoss.toFixed(5)}`,
+      });
+      activeTpPriceLineRef.current = series.createPriceLine({
+        price: takeProfit,
+        color: "#22c55e",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: `TP @ ${takeProfit.toFixed(5)}`,
+      });
+    } else {
+      // Trade filled or cancelled — remove active SL/TP lines
+      if (activeSlPriceLineRef.current) {
+        try { series.removePriceLine(activeSlPriceLineRef.current); } catch {}
+        activeSlPriceLineRef.current = null;
+      }
+      if (activeTpPriceLineRef.current) {
+        try { series.removePriceLine(activeTpPriceLineRef.current); } catch {}
+        activeTpPriceLineRef.current = null;
+      }
+    }
+  }, [engine.activeOrder]);
+
+  // rAF loop: reposition DOM overlays to track price lines
+  useEffect(() => {
+    const container = chartContainerRef.current;
+    if (!container || (!engine.pendingOrder && !engine.activeOrder)) {
+      if (overlayRafRef.current) cancelAnimationFrame(overlayRafRef.current);
+      // Hide all overlays
+      if (cancelBtnRef.current)  cancelBtnRef.current.style.display  = "none";
+      if (slHandleRef.current)   slHandleRef.current.style.display   = "none";
+      if (tpHandleRef.current)   tpHandleRef.current.style.display   = "none";
+      return;
+    }
+
+    const order = engine.pendingOrder ?? engine.activeOrder!;
+    const series = seriesRef.current;
+    if (!series) return;
+
+    const tick = () => {
+      const slY  = series.priceToCoordinate(order.stopLoss);
+      const tpY  = series.priceToCoordinate(order.takeProfit);
+      const entY = engine.pendingOrder
+        ? series.priceToCoordinate(order.entryPrice)
+        : null;
+
+      // Cancel button: only when pending, positioned on entry line right side
+      if (cancelBtnRef.current) {
+        if (engine.pendingOrder && entY !== null) {
+          const w = container.clientWidth;
+          cancelBtnRef.current.style.display = "flex";
+          cancelBtnRef.current.style.top  = `${entY - 10}px`;
+          cancelBtnRef.current.style.left = `${w - 90}px`;
+        } else {
+          cancelBtnRef.current.style.display = "none";
+        }
+      }
+
+      // SL handle: only when pending
+      if (slHandleRef.current) {
+        if (engine.pendingOrder && slY !== null) {
+          slHandleRef.current.style.display = "flex";
+          slHandleRef.current.style.top  = `${slY - 10}px`;
+          slHandleRef.current.style.left = "4px";
+        } else {
+          slHandleRef.current.style.display = "none";
+        }
+      }
+
+      // TP handle: pending or active
+      if (tpHandleRef.current) {
+        if (tpY !== null) {
+          tpHandleRef.current.style.display = "flex";
+          tpHandleRef.current.style.top  = `${tpY - 10}px`;
+          tpHandleRef.current.style.left = "4px";
+        } else {
+          tpHandleRef.current.style.display = "none";
+        }
+      }
+
+      overlayRafRef.current = requestAnimationFrame(tick);
+    };
+
+    overlayRafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (overlayRafRef.current) cancelAnimationFrame(overlayRafRef.current);
+    };
+  }, [engine.pendingOrder, engine.activeOrder]);
+
+  // Pointer drag handlers for SL/TP handles (runs once at mount)
+  useEffect(() => {
+    const container = chartContainerRef.current;
+    if (!container) return;
+
+    const onSlPointerDown = (e: PointerEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const order = pendingOrderSnapshot.current ?? activeOrderSnapshot.current;
+      if (!order) return;
+      dragModifyRef.current = { target: "sl", originalValue: order.stopLoss, draftValue: order.stopLoss };
+      setDragModify({ ...dragModifyRef.current });
+      slHandleRef.current?.setPointerCapture(e.pointerId);
+    };
+
+    const onTpPointerDown = (e: PointerEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const order = pendingOrderSnapshot.current ?? activeOrderSnapshot.current;
+      if (!order) return;
+      dragModifyRef.current = { target: "tp", originalValue: order.takeProfit, draftValue: order.takeProfit };
+      setDragModify({ ...dragModifyRef.current });
+      tpHandleRef.current?.setPointerCapture(e.pointerId);
+    };
+
+    const onHandlePointerMove = (e: PointerEvent) => {
+      const dm = dragModifyRef.current;
+      if (!dm || !seriesRef.current) return;
+      e.stopPropagation();
+      const r = container.getBoundingClientRect();
+      const price = seriesRef.current.coordinateToPrice(e.clientY - r.top);
+      if (price == null) return;
+      dragModifyRef.current = { ...dm, draftValue: price };
+      setDragModify({ ...dragModifyRef.current });
+    };
+
+    const onHandlePointerUp = (e: PointerEvent) => {
+      const dm = dragModifyRef.current;
+      if (!dm) return;
+      e.stopPropagation();
+      dragModifyRef.current = null;
+      setDragModify(null);
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      setPendingModification({
+        target: dm.target,
+        oldValue: r2(dm.originalValue),
+        newValue: r2(dm.draftValue),
+      });
+    };
+
+    const sl = slHandleRef.current;
+    const tp = tpHandleRef.current;
+    sl?.addEventListener("pointerdown", onSlPointerDown);
+    tp?.addEventListener("pointerdown", onTpPointerDown);
+    sl?.addEventListener("pointermove", onHandlePointerMove);
+    tp?.addEventListener("pointermove", onHandlePointerMove);
+    sl?.addEventListener("pointerup", onHandlePointerUp);
+    tp?.addEventListener("pointerup", onHandlePointerUp);
+
+    return () => {
+      sl?.removeEventListener("pointerdown", onSlPointerDown);
+      tp?.removeEventListener("pointerdown", onTpPointerDown);
+      sl?.removeEventListener("pointermove", onHandlePointerMove);
+      tp?.removeEventListener("pointermove", onHandlePointerMove);
+      sl?.removeEventListener("pointerup", onHandlePointerUp);
+      tp?.removeEventListener("pointerup", onHandlePointerUp);
+    };
+  }, []); // refs are stable — no deps needed
+
+  // Live price line update during drag
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series || !dragModify) return;
+
+    if (dragModify.target === "sl") {
+      if (slPriceLineRef.current) {
+        try { series.removePriceLine(slPriceLineRef.current); } catch {}
+      }
+      slPriceLineRef.current = series.createPriceLine({
+        price: dragModify.draftValue,
+        color: "#ef4444",
+        lineWidth: 2,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: `SL @ ${dragModify.draftValue.toFixed(5)}`,
+      });
+      if (activeSlPriceLineRef.current) {
+        try { series.removePriceLine(activeSlPriceLineRef.current); } catch {}
+        activeSlPriceLineRef.current = series.createPriceLine({
+          price: dragModify.draftValue,
+          color: "#ef4444",
+          lineWidth: 2,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: `SL @ ${dragModify.draftValue.toFixed(5)}`,
+        });
+      }
+    } else {
+      if (tpPriceLineRef.current) {
+        try { series.removePriceLine(tpPriceLineRef.current); } catch {}
+      }
+      tpPriceLineRef.current = series.createPriceLine({
+        price: dragModify.draftValue,
+        color: "#22c55e",
+        lineWidth: 2,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: `TP @ ${dragModify.draftValue.toFixed(5)}`,
+      });
+      if (activeTpPriceLineRef.current) {
+        try { series.removePriceLine(activeTpPriceLineRef.current); } catch {}
+        activeTpPriceLineRef.current = series.createPriceLine({
+          price: dragModify.draftValue,
+          color: "#22c55e",
+          lineWidth: 2,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: `TP @ ${dragModify.draftValue.toFixed(5)}`,
+        });
+      }
+    }
+  }, [dragModify]);
+
+  async function handleConfirmModification() {
+    if (!pendingModification || !activeTradeId) return;
+    const order = pendingOrderSnapshot.current ?? activeOrderSnapshot.current;
+    if (!order) return;
+
+    const newSl = pendingModification.target === "sl"
+      ? pendingModification.newValue
+      : order.stopLoss;
+    const newTp = pendingModification.target === "tp"
+      ? pendingModification.newValue
+      : order.takeProfit;
+
+    setIsSaving(true);
+    try {
+      await updateOrderLevels(activeTradeId, newSl, newTp);
+      // Update engine for active orders so checkOrderExit uses new values
+      if (activeOrderSnapshot.current) {
+        engine.updateActiveOrderLevels(newSl, newTp);
+      }
+      // TODO (Task 4): handle pending order SL/TP update in engine
+      setPendingModification(null);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function handleCancelModification() {
+    setPendingModification(null);
+    // Restore correct price lines directly
+    const series = seriesRef.current;
+    if (!series) return;
+    const order = pendingOrderSnapshot.current ?? activeOrderSnapshot.current;
+    if (!order) return;
+    // Restore SL line
+    if (slPriceLineRef.current) {
+      try { series.removePriceLine(slPriceLineRef.current); } catch {}
+    }
+    slPriceLineRef.current = series.createPriceLine({
+      price: order.stopLoss,
+      color: "#ef4444", lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
+      title: `SL @ ${order.stopLoss.toFixed(5)}`,
+    });
+    if (activeSlPriceLineRef.current) {
+      try { series.removePriceLine(activeSlPriceLineRef.current); } catch {}
+      activeSlPriceLineRef.current = series.createPriceLine({
+        price: order.stopLoss,
+        color: "#ef4444", lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
+        title: `SL @ ${order.stopLoss.toFixed(5)}`,
+      });
+    }
+    // Restore TP line
+    if (tpPriceLineRef.current) {
+      try { series.removePriceLine(tpPriceLineRef.current); } catch {}
+    }
+    tpPriceLineRef.current = series.createPriceLine({
+      price: order.takeProfit,
+      color: "#22c55e", lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
+      title: `TP @ ${order.takeProfit.toFixed(5)}`,
+    });
+    if (activeTpPriceLineRef.current) {
+      try { series.removePriceLine(activeTpPriceLineRef.current); } catch {}
+      activeTpPriceLineRef.current = series.createPriceLine({
+        price: order.takeProfit,
+        color: "#22c55e", lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
+        title: `TP @ ${order.takeProfit.toFixed(5)}`,
+      });
+    }
+  }
 
   async function handleEntryConfirm() {
     if (!overlayState || !engine.currentBar) return;
@@ -986,6 +1383,158 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
           ref={overlayDivRef}
           className="absolute inset-0"
         />
+
+        {/* Cancel order button — floats over entry price line, pending only */}
+        <div
+          ref={cancelBtnRef}
+          style={{
+            display: "none",
+            position: "absolute",
+            zIndex: 15,
+            alignItems: "center",
+            gap: "4px",
+            backgroundColor: "#1f2937",
+            border: "1px solid #ef4444",
+            borderRadius: "4px",
+            padding: "2px 8px",
+            cursor: "pointer",
+            fontSize: "11px",
+            color: "#f87171",
+            userSelect: "none",
+            pointerEvents: "all",
+          }}
+          onClick={() => engine.cancelPendingOrder()}
+        >
+          <X size={10} /> Annuler
+        </div>
+
+        {/* SL drag handle — floats over SL price line, pending only */}
+        <div
+          ref={slHandleRef}
+          style={{
+            display: "none",
+            position: "absolute",
+            zIndex: 15,
+            width: "20px",
+            height: "20px",
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "#ef4444",
+            borderRadius: "3px",
+            cursor: "ns-resize",
+            touchAction: "none",
+            pointerEvents: "all",
+          }}
+        >
+          <span style={{ color: "#fff", fontSize: "9px", lineHeight: 1, userSelect: "none" }}>⠿</span>
+        </div>
+
+        {/* TP drag handle — floats over TP price line, pending or active */}
+        <div
+          ref={tpHandleRef}
+          style={{
+            display: "none",
+            position: "absolute",
+            zIndex: 15,
+            width: "20px",
+            height: "20px",
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "#22c55e",
+            borderRadius: "3px",
+            cursor: "ns-resize",
+            touchAction: "none",
+            pointerEvents: "all",
+          }}
+        >
+          <span style={{ color: "#fff", fontSize: "9px", lineHeight: 1, userSelect: "none" }}>⠿</span>
+        </div>
+
+        {/* Modification confirmation mini-panel */}
+        {pendingModification && (() => {
+          const order = pendingOrderSnapshot.current ?? activeOrderSnapshot.current;
+          if (!order) return null;
+          const newSl = pendingModification.target === "sl" ? pendingModification.newValue : order.stopLoss;
+          const newTp = pendingModification.target === "tp" ? pendingModification.newValue : order.takeProfit;
+          const risk   = Math.abs(order.entryPrice - newSl);
+          const reward = Math.abs(order.entryPrice - newTp);
+          const rr     = risk > 0 ? (reward / risk).toFixed(2) : "—";
+          const label  = pendingModification.target === "sl" ? "SL" : "TP";
+          return (
+            <div
+              style={{
+                position: "absolute",
+                bottom: "16px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 20,
+                backgroundColor: "#111827",
+                border: "1px solid #374151",
+                borderRadius: "8px",
+                padding: "12px 16px",
+                minWidth: "240px",
+                boxShadow: "0 4px 24px rgba(0,0,0,0.6)",
+                pointerEvents: "all",
+              }}
+            >
+              <div style={{ color: "#9ca3af", fontSize: "11px", fontWeight: "bold", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Modifier {label}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "12px", fontFamily: "ui-monospace, monospace", fontSize: "12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#6b7280" }}>Ancien</span>
+                  <span style={{ color: "#d1d5db" }}>{pendingModification.oldValue.toFixed(2)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#6b7280" }}>Nouveau</span>
+                  <span style={{ color: pendingModification.target === "sl" ? "#f87171" : "#4ade80" }}>
+                    {pendingModification.newValue.toFixed(2)}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #1f2937", paddingTop: "4px", marginTop: "4px" }}>
+                  <span style={{ color: "#6b7280" }}>Nouveau R/R</span>
+                  <span style={{ color: "#a5b4fc", fontWeight: "bold" }}>{rr}R</span>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={handleConfirmModification}
+                  disabled={isSaving}
+                  style={{
+                    flex: 1,
+                    padding: "6px 0",
+                    backgroundColor: "#6366f1",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: "bold",
+                    cursor: isSaving ? "not-allowed" : "pointer",
+                    opacity: isSaving ? 0.6 : 1,
+                  }}
+                >
+                  {isSaving ? "…" : "Confirmer"}
+                </button>
+                <button
+                  onClick={handleCancelModification}
+                  disabled={isSaving}
+                  style={{
+                    flex: 1,
+                    padding: "6px 0",
+                    backgroundColor: "#1f2937",
+                    color: "#9ca3af",
+                    border: "1px solid #374151",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Annuler
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* TF loader overlay */}
         {isLoadingTf && (
