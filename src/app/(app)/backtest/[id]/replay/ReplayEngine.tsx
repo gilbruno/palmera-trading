@@ -27,7 +27,8 @@ import { useReplayEngine, type Bar, type FilledTrade } from "./useReplayEngine";
 import { getSessionBands, calcIBRange, calcVwap, type SessionBand } from "./indicators";
 import { OrderOverlay, type OrderOverlayState, type DragTarget } from "./OrderOverlay";
 import { OrderPanel } from "./OrderPanel";
-import { TradeResultModal } from "./TradeResultModal";
+import { EntryConfirmModal } from "./EntryConfirmModal";
+import { ExitConfirmModal } from "./ExitConfirmModal";
 import { createReplayTrade, updateReplayTrade } from "./actions";
 import Link from "next/link";
 import { ArrowLeft, Maximize2, Minimize2, TrendingUp, TrendingDown, X } from "lucide-react";
@@ -159,8 +160,10 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
 
   const [showOrderPanel, setShowOrderPanel] = useState(false);
   const [vwapAnchorIndex, setVwapAnchorIndex] = useState<number | null>(null);
-  const [pendingTrade, setPendingTrade] = useState<FilledTrade | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const [entryModalOpen, setEntryModalOpen] = useState(false);
+  const [exitModal, setExitModal]           = useState<FilledTrade | null>(null);
+  const [activeTradeId, setActiveTradeId]   = useState<string | null>(null);
+  const [isSaving, setIsSaving]             = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -188,14 +191,22 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
     setActiveTool(tool);
   }
 
+  // engineRef allows handleTradeFilled to call engine.pause() without a
+  // circular dependency (engine depends on handleTradeFilled via useReplayEngine).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const engineRef = useRef<any>(null);
+
   const handleTradeFilled = useCallback((trade: FilledTrade) => {
-    setPendingTrade(trade);
+    engineRef.current?.pause();
+    setExitModal(trade);
   }, []);
 
   // Keep barsRef in sync for use inside the click closure
   useEffect(() => { barsRef.current = bars; }, [bars]);
 
   const engine = useReplayEngine(bars, { onTradeFilled: handleTradeFilled });
+  // Sync engineRef so handleTradeFilled always accesses the latest engine instance.
+  engineRef.current = engine;
 
   const router = useRouter();
 
@@ -595,29 +606,54 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
 
   }, [engine.visibleBars]);
 
-  async function handleSaveTrade(notes: string) {
-    if (!pendingTrade) return;
+  async function handleEntryConfirm() {
+    if (!overlayState || !engine.currentBar) return;
     setIsSaving(true);
     try {
-      const entry = {
-        direction: pendingTrade.order.direction,
-        entryPrice: pendingTrade.order.entryPrice,
-        stopLoss: pendingTrade.order.stopLoss,
-        takeProfit: pendingTrade.order.takeProfit,
-        entryDate: new Date(pendingTrade.entryBar.time * 1000),
-      };
-      const tradeId = await createReplayTrade(backtestId, entry);
+      const id = await createReplayTrade(backtestId, {
+        direction:  overlayState.direction,
+        entryPrice: overlayState.entry,
+        stopLoss:   overlayState.sl,
+        takeProfit: overlayState.tp,
+        entryDate:  new Date(engine.currentBar.time * 1000),
+      });
+      setActiveTradeId(id);
+      engine.placeOrder({
+        direction:     overlayState.direction,
+        entryPrice:    overlayState.entry,
+        stopLoss:      overlayState.sl,
+        takeProfit:    overlayState.tp,
+        entryBarIndex: engine.currentIndex,
+      });
+      overlayStateRef.current = null;
+      setOverlayState(null);
+      orderOverlayRef.current?.clear();
+      if (overlayDivRef.current) overlayDivRef.current.style.pointerEvents = "none";
+      setEntryModalOpen(false);
+      engine.play();
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
-      const exit = {
-        exitPrice: pendingTrade.exitPrice,
-        exitDate: new Date(pendingTrade.exitBar.time * 1000),
-        outcome: pendingTrade.outcome,
-        rMultiple: pendingTrade.rMultiple,
-        pnlPoints: pendingTrade.pnlPoints,
-      };
-      await updateReplayTrade(tradeId, exit, notes);
-
-      setPendingTrade(null);
+  async function handleExitSave(notes: string) {
+    if (!exitModal || !activeTradeId) return;
+    setIsSaving(true);
+    try {
+      await updateReplayTrade(
+        activeTradeId,
+        {
+          exitPrice: exitModal.exitPrice,
+          exitDate:  new Date(exitModal.exitBar.time * 1000),
+          outcome:   exitModal.outcome,
+          rMultiple: exitModal.rMultiple,
+          pnlPoints: exitModal.pnlPoints,
+        },
+        notes
+      );
+      setActiveTradeId(null);
+      // Laisser 1.8s pour le fade-out avant de démonter
+      setTimeout(() => setExitModal(null), 1800);
     } finally {
       setIsSaving(false);
     }
@@ -730,20 +766,24 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
                 E {overlayState.entry.toFixed(5)} · SL {overlayState.sl.toFixed(5)} · TP {overlayState.tp.toFixed(5)}
               </span>
               <button
-                onClick={() => {
-                  engine.pause();
-                  engine.placeOrder({ direction: overlayState.direction, entryPrice: overlayState.entry, stopLoss: overlayState.sl, takeProfit: overlayState.tp, entryBarIndex: engine.currentIndex });
-                  overlayStateRef.current = null; setOverlayState(null); orderOverlayRef.current?.clear();
-                  if (overlayDivRef.current) overlayDivRef.current.style.pointerEvents = "none";
-                }}
+                onClick={() => { engine.pause(); setEntryModalOpen(true); }}
                 className="cursor-pointer rounded-lg px-2 py-1 text-xs font-bold"
                 style={{ backgroundColor: "#6366f1", color: "#fff" }}
-              >Confirm</button>
+              >
+                Confirm
+              </button>
               <button
-                onClick={() => { overlayStateRef.current = null; setOverlayState(null); orderOverlayRef.current?.clear(); if (overlayDivRef.current) overlayDivRef.current.style.pointerEvents = "none"; }}
+                onClick={() => {
+                  overlayStateRef.current = null;
+                  setOverlayState(null);
+                  orderOverlayRef.current?.clear();
+                  if (overlayDivRef.current) overlayDivRef.current.style.pointerEvents = "none";
+                }}
                 className="cursor-pointer flex h-5 w-5 items-center justify-center rounded"
                 style={{ backgroundColor: "#1f2937", color: "#9ca3af" }}
-              ><X size={11} /></button>
+              >
+                <X size={11} />
+              </button>
             </>
           )}
         </div>
@@ -926,12 +966,22 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
         />
       )}
 
-      {/* Trade result modal */}
-      {pendingTrade && (
-        <TradeResultModal
-          trade={pendingTrade}
-          onSave={handleSaveTrade}
-          onDiscard={() => setPendingTrade(null)}
+      {/* Entry confirm modal */}
+      {entryModalOpen && overlayState && engine.currentBar && (
+        <EntryConfirmModal
+          overlayState={overlayState}
+          entryBar={engine.currentBar}
+          onConfirm={handleEntryConfirm}
+          onCancel={() => { setEntryModalOpen(false); engine.play(); }}
+          isSaving={isSaving}
+        />
+      )}
+
+      {/* Exit confirm modal */}
+      {exitModal && (
+        <ExitConfirmModal
+          trade={exitModal}
+          onSave={handleExitSave}
           isSaving={isSaving}
         />
       )}
