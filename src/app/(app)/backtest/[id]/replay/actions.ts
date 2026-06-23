@@ -8,6 +8,7 @@ import { auth } from "@/lib/auth";
 
 export type TradeEntry = {
   direction: "LONG" | "SHORT";
+  orderType: "MARKET" | "LIMIT" | "STOP";
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
@@ -46,6 +47,7 @@ export async function createReplayTrade(
       backtestId,
       tradeNumber,
       direction:  entry.direction,
+      orderType:  entry.orderType,
       entryDate:  entry.entryDate,
       entryPrice: entry.entryPrice,
       stopLoss:   entry.stopLoss,
