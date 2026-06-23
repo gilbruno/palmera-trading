@@ -258,6 +258,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
           entryDate:  new Date(activationBar.time * 1000),
         });
         setActiveTradeId(id);
+        void captureAndUploadScreenshot(id);
       } catch (err) {
         console.error("Failed to create trade on activation:", err);
       }
@@ -1069,6 +1070,29 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
     // For active orders, activeSlPriceLineRef already exists and was not modified
   }
 
+  async function captureAndUploadScreenshot(tradeId: string): Promise<void> {
+    const chart = chartRef.current;
+    if (!chart) return;
+    try {
+      const canvas = chart.takeScreenshot();
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/png")
+      );
+      if (!blob) return;
+      const file = new File([blob], `replay-${tradeId}.png`, { type: "image/png" });
+      const form = new FormData();
+      form.append("file", file);
+      form.append("tradeId", tradeId);
+      form.append("type", "backtest");
+      const res = await fetch("/api/upload", { method: "POST", body: form });
+      if (!res.ok) {
+        console.error("[replay] screenshot upload failed:", res.status, await res.text());
+      }
+    } catch (err) {
+      console.error("[replay] screenshot capture error:", err);
+    }
+  }
+
   async function handleEntryConfirm() {
     if (!overlayState || !engine.currentBar) return;
     setIsSaving(true);
@@ -1099,6 +1123,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
           entryDate:  new Date(engine.currentBar.time * 1000),
         });
         setActiveTradeId(id);
+        void captureAndUploadScreenshot(id);
       }
 
       engine.placeOrder(order);
@@ -1630,6 +1655,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
                   entryDate:  new Date(engine.currentBar.time * 1000),
                 });
                 setActiveTradeId(id);
+                void captureAndUploadScreenshot(id);
               } catch (err) {
                 console.error("Failed to create MARKET trade from OrderPanel:", err);
               }
