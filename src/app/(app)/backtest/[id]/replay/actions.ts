@@ -42,6 +42,8 @@ export async function createReplayTrade(
   });
   const tradeNumber = (max._max.tradeNumber ?? 0) + 1;
 
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
   const created = await prisma.backtestTrade.create({
     data: {
       backtestId,
@@ -49,9 +51,9 @@ export async function createReplayTrade(
       direction:  entry.direction,
       orderType:  entry.orderType,
       entryDate:  entry.entryDate,
-      entryPrice: entry.entryPrice,
-      stopLoss:   entry.stopLoss,
-      takeProfit: entry.takeProfit,
+      entryPrice: r2(entry.entryPrice),
+      stopLoss:   r2(entry.stopLoss),
+      takeProfit: r2(entry.takeProfit),
       // exit fields left null — filled in by updateReplayTrade
     },
     select: { id: true },
@@ -77,16 +79,44 @@ export async function updateReplayTrade(
     throw new Error("Unauthorized");
   }
 
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
   await prisma.backtestTrade.update({
     where: { id: tradeId },
     data: {
       exitDate:  exit.exitDate,
-      exitPrice: exit.exitPrice,
+      exitPrice: r2(exit.exitPrice),
       outcome:   exit.outcome,
       rMultiple: exit.rMultiple,
       pnlPoints: exit.pnlPoints,
       notes:     notes.trim() || null,
     },
+  });
+
+  revalidatePath(`/backtest/${trade.backtestId}`);
+}
+
+export async function updateOrderLevels(
+  tradeId: string,
+  sl: number,
+  tp: number
+): Promise<void> {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user?.id) redirect("/");
+
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
+  const trade = await prisma.backtestTrade.findUnique({
+    where: { id: tradeId },
+    select: { backtestId: true, backtest: { select: { userId: true } } },
+  });
+  if (!trade || trade.backtest.userId !== session.user.id) {
+    throw new Error("Unauthorized");
+  }
+
+  await prisma.backtestTrade.update({
+    where: { id: tradeId },
+    data: { stopLoss: r2(sl), takeProfit: r2(tp) },
   });
 
   revalidatePath(`/backtest/${trade.backtestId}`);
