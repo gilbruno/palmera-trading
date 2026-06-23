@@ -1016,7 +1016,10 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
       if (activeOrderSnapshot.current) {
         engine.updateActiveOrderLevels(newSl, newTp);
       }
-      // TODO (Task 4): handle pending order SL/TP update in engine
+      // For pending orders update the engine state
+      if (pendingOrderSnapshot.current) {
+        engine.updatePendingOrderLevels(newSl, newTp);
+      }
       setPendingModification(null);
     } finally {
       setIsSaving(false);

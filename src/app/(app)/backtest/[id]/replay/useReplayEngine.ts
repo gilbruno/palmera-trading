@@ -209,6 +209,15 @@ export function useReplayEngine(
     });
   }, []);
 
+  const updatePendingOrderLevels = useCallback((sl: number, tp: number) => {
+    setPendingOrder((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, stopLoss: sl, takeProfit: tp };
+      pendingOrderRef.current = updated;
+      return updated;
+    });
+  }, []);
+
   useEffect(() => {
     if (!isPlaying) {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -239,5 +248,6 @@ export function useReplayEngine(
     cancelPendingOrder,
     cancelActiveOrder,
     updateActiveOrderLevels,
+    updatePendingOrderLevels,
   };
 }
