@@ -203,19 +203,24 @@ export function useReplayEngine(
   const updateActiveOrderLevels = useCallback((sl: number, tp: number) => {
     setActiveOrder((prev) => {
       if (!prev) return prev;
-      const updated = { ...prev, stopLoss: sl, takeProfit: tp };
-      activeOrderRef.current = updated;
-      return updated;
+      return { ...prev, stopLoss: sl, takeProfit: tp };
     });
+    // Update ref after scheduling the state update.
+    // The interval runs on the next tick after this synchronous call completes,
+    // so the ref will be current when checkOrderExit reads it.
+    if (activeOrderRef.current) {
+      activeOrderRef.current = { ...activeOrderRef.current, stopLoss: sl, takeProfit: tp };
+    }
   }, []);
 
   const updatePendingOrderLevels = useCallback((sl: number, tp: number) => {
     setPendingOrder((prev) => {
       if (!prev) return prev;
-      const updated = { ...prev, stopLoss: sl, takeProfit: tp };
-      pendingOrderRef.current = updated;
-      return updated;
+      return { ...prev, stopLoss: sl, takeProfit: tp };
     });
+    if (pendingOrderRef.current) {
+      pendingOrderRef.current = { ...pendingOrderRef.current, stopLoss: sl, takeProfit: tp };
+    }
   }, []);
 
   useEffect(() => {

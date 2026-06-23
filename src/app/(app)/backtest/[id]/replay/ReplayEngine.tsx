@@ -809,34 +809,35 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
 
   // rAF loop: reposition DOM overlays to track price lines
   useEffect(() => {
-    const container = chartContainerRef.current;
-    if (!container || (!engine.pendingOrder && !engine.activeOrder)) {
+    if (!engine.pendingOrder && !engine.activeOrder) {
       if (overlayRafRef.current) cancelAnimationFrame(overlayRafRef.current);
-      // Hide all overlays
       if (cancelBtnRef.current)  cancelBtnRef.current.style.display  = "none";
       if (slHandleRef.current)   slHandleRef.current.style.display   = "none";
       if (tpHandleRef.current)   tpHandleRef.current.style.display   = "none";
       return;
     }
 
-    const order = engine.pendingOrder ?? engine.activeOrder!;
-    const series = seriesRef.current;
-    if (!series) return;
-
     const tick = () => {
-      const slY  = series.priceToCoordinate(order.stopLoss);
-      const tpY  = series.priceToCoordinate(order.takeProfit);
-      const entY = engine.pendingOrder
-        ? series.priceToCoordinate(order.entryPrice)
-        : null;
+      const order = pendingOrderSnapshot.current ?? activeOrderSnapshot.current;
+      const series = seriesRef.current;
+      const container = chartContainerRef.current;
+      if (!order || !series || !container) {
+        overlayRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
 
       // Cancel button: only when pending, positioned on entry line right side
       if (cancelBtnRef.current) {
-        if (engine.pendingOrder && entY !== null) {
-          const w = container.clientWidth;
-          cancelBtnRef.current.style.display = "flex";
-          cancelBtnRef.current.style.top  = `${entY - 10}px`;
-          cancelBtnRef.current.style.left = `${w - 90}px`;
+        if (pendingOrderSnapshot.current) {
+          const entY = series.priceToCoordinate(order.entryPrice);
+          if (entY !== null) {
+            const w = container.clientWidth;
+            cancelBtnRef.current.style.display = "flex";
+            cancelBtnRef.current.style.top  = `${entY - 10}px`;
+            cancelBtnRef.current.style.left = `${w - 90}px`;
+          } else {
+            cancelBtnRef.current.style.display = "none";
+          }
         } else {
           cancelBtnRef.current.style.display = "none";
         }
@@ -844,10 +845,15 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
 
       // SL handle: only when pending
       if (slHandleRef.current) {
-        if (engine.pendingOrder && slY !== null) {
-          slHandleRef.current.style.display = "flex";
-          slHandleRef.current.style.top  = `${slY - 10}px`;
-          slHandleRef.current.style.left = "4px";
+        if (pendingOrderSnapshot.current) {
+          const slY = series.priceToCoordinate(order.stopLoss);
+          if (slY !== null) {
+            slHandleRef.current.style.display = "flex";
+            slHandleRef.current.style.top  = `${slY - 10}px`;
+            slHandleRef.current.style.left = "4px";
+          } else {
+            slHandleRef.current.style.display = "none";
+          }
         } else {
           slHandleRef.current.style.display = "none";
         }
@@ -855,6 +861,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
 
       // TP handle: pending or active
       if (tpHandleRef.current) {
+        const tpY = series.priceToCoordinate(order.takeProfit);
         if (tpY !== null) {
           tpHandleRef.current.style.display = "flex";
           tpHandleRef.current.style.top  = `${tpY - 10}px`;
@@ -998,7 +1005,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
   }, [dragModify]);
 
   async function handleConfirmModification() {
-    if (!pendingModification || !activeTradeId) return;
+    if (!pendingModification) return;
     const order = pendingOrderSnapshot.current ?? activeOrderSnapshot.current;
     if (!order) return;
 
@@ -1011,13 +1018,13 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
 
     setIsSaving(true);
     try {
-      await updateOrderLevels(activeTradeId, newSl, newTp);
-      // Update engine for active orders so checkOrderExit uses new values
-      if (activeOrderSnapshot.current) {
+      if (activeOrderSnapshot.current && activeTradeId) {
+        // Active order: update DB + engine
+        await updateOrderLevels(activeTradeId, newSl, newTp);
         engine.updateActiveOrderLevels(newSl, newTp);
-      }
-      // For pending orders update the engine state
-      if (pendingOrderSnapshot.current) {
+      } else if (pendingOrderSnapshot.current) {
+        // Pending order: no DB row yet — only update engine state
+        // DB will be created at activation with the new values
         engine.updatePendingOrderLevels(newSl, newTp);
       }
       setPendingModification(null);
@@ -1028,45 +1035,38 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
 
   function handleCancelModification() {
     setPendingModification(null);
-    // Restore correct price lines directly
     const series = seriesRef.current;
     if (!series) return;
     const order = pendingOrderSnapshot.current ?? activeOrderSnapshot.current;
     if (!order) return;
-    // Restore SL line
-    if (slPriceLineRef.current) {
-      try { series.removePriceLine(slPriceLineRef.current); } catch {}
-    }
-    slPriceLineRef.current = series.createPriceLine({
-      price: order.stopLoss,
-      color: "#ef4444", lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
-      title: `SL @ ${order.stopLoss.toFixed(5)}`,
-    });
-    if (activeSlPriceLineRef.current) {
-      try { series.removePriceLine(activeSlPriceLineRef.current); } catch {}
-      activeSlPriceLineRef.current = series.createPriceLine({
-        price: order.stopLoss,
-        color: "#ef4444", lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
-        title: `SL @ ${order.stopLoss.toFixed(5)}`,
-      });
-    }
-    // Restore TP line
+
+    // Restore TP line always (both pending and active)
     if (tpPriceLineRef.current) {
       try { series.removePriceLine(tpPriceLineRef.current); } catch {}
     }
     tpPriceLineRef.current = series.createPriceLine({
-      price: order.takeProfit,
-      color: "#22c55e", lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
-      title: `TP @ ${order.takeProfit.toFixed(5)}`,
+      price: order.takeProfit, color: "#22c55e", lineWidth: 1, lineStyle: 2,
+      axisLabelVisible: true, title: `TP @ ${order.takeProfit.toFixed(5)}`,
     });
     if (activeTpPriceLineRef.current) {
       try { series.removePriceLine(activeTpPriceLineRef.current); } catch {}
       activeTpPriceLineRef.current = series.createPriceLine({
-        price: order.takeProfit,
-        color: "#22c55e", lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
-        title: `TP @ ${order.takeProfit.toFixed(5)}`,
+        price: order.takeProfit, color: "#22c55e", lineWidth: 1, lineStyle: 2,
+        axisLabelVisible: true, title: `TP @ ${order.takeProfit.toFixed(5)}`,
       });
     }
+
+    // Restore SL line only for pending orders
+    if (pendingOrderSnapshot.current) {
+      if (slPriceLineRef.current) {
+        try { series.removePriceLine(slPriceLineRef.current); } catch {}
+      }
+      slPriceLineRef.current = series.createPriceLine({
+        price: order.stopLoss, color: "#ef4444", lineWidth: 1, lineStyle: 2,
+        axisLabelVisible: true, title: `SL @ ${order.stopLoss.toFixed(5)}`,
+      });
+    }
+    // For active orders, activeSlPriceLineRef already exists and was not modified
   }
 
   async function handleEntryConfirm() {
