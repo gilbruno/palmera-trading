@@ -84,11 +84,17 @@ class OrderRenderer implements IPrimitivePaneRenderer {
       ctx.strokeRect(x1, Math.min(yS, yT), rectW, Math.abs(yT - yS));
       ctx.restore();
 
+      // R/R ratio
+      const risk   = Math.abs(entry - sl);
+      const reward = Math.abs(entry - tp);
+      const rr     = risk > 0 ? (reward / risk) : 0;
+      const rrStr  = `${rr.toFixed(2)}R`;
+
       // Per-level: line + label + handle
       const levels: { y: number; lineCol: string; labelBg: string; label: string; target: DragTarget }[] = [
-        { y: yT, lineCol: tpLine,    labelBg: tpLine,    label: `TP  ${tp.toFixed(5)}`,    target: "tp"    },
-        { y: yE, lineCol: "#f8fafc", labelBg: "#334155", label: `Entry  ${entry.toFixed(5)}`, target: "entry" },
-        { y: yS, lineCol: slLine,    labelBg: slLine,    label: `SL  ${sl.toFixed(5)}`,    target: "sl"    },
+        { y: yT, lineCol: tpLine,    labelBg: tpLine,    label: `TP  ${tp.toFixed(5)}  +${rrStr}`, target: "tp"    },
+        { y: yE, lineCol: "#f8fafc", labelBg: "#334155", label: `Entry  ${entry.toFixed(5)}  R/R ${rrStr}`, target: "entry" },
+        { y: yS, lineCol: slLine,    labelBg: slLine,    label: `SL  ${sl.toFixed(5)}  −1R`,          target: "sl"    },
       ];
 
       for (const { y, lineCol, labelBg, label, target } of levels) {
