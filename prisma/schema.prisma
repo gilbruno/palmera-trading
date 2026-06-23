@@ -108,6 +108,12 @@ enum Direction {
   SHORT
 }
 
+enum OrderType {
+  MARKET
+  LIMIT
+  STOP
+}
+
 enum AssetClass {
   FOREX
   CRYPTO
@@ -636,6 +642,7 @@ model BacktestTrade {
 
   // Direction & résultat
   direction Direction
+  orderType OrderType @default(MARKET)
   outcome   TradeOutcome?
 
   // R-multiple (+2.5R, -1R…)
