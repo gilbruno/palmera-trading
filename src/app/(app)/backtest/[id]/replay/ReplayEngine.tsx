@@ -147,6 +147,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
   const [isLoadingTf, setIsLoadingTf] = useState(false);
   const [loadingTfTarget, setLoadingTfTarget] = useState<string>("");
   const abortFetchRef = useRef<AbortController | null>(null);
+  const exitModalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fitOnNextRenderRef = useRef(false);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const overlayDivRef = useRef<HTMLDivElement>(null);
@@ -514,6 +515,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
       document.body.style.cursor = "";
       chart.unsubscribeCrosshairMove(onCrosshairMove);
       chart.remove();
+      if (exitModalTimerRef.current) clearTimeout(exitModalTimerRef.current);
     };
   }, []);
 
@@ -652,8 +654,8 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
         notes
       );
       setActiveTradeId(null);
-      // Laisser 1.8s pour le fade-out avant de démonter
-      setTimeout(() => setExitModal(null), 1800);
+      if (exitModalTimerRef.current) clearTimeout(exitModalTimerRef.current);
+      exitModalTimerRef.current = setTimeout(() => setExitModal(null), 1800);
     } finally {
       setIsSaving(false);
     }
