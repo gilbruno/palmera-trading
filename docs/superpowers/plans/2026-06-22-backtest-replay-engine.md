@@ -4,7 +4,7 @@
 
 **Goal:** Implémenter un moteur de replay barre-par-barre style FXReplay, intégré à la page de backtest existante, permettant de passer des ordres directement sur le graphique et de les enregistrer automatiquement comme `BacktestTrade`.
 
-**Architecture:** Les données OHLCV M1 sont téléchargées depuis Dukascopy via `dukascopy-node` dans une table `OhlcvBar` dédiée (partagée entre backtests). Le replay engine tourne 100% côté client avec `lightweight-charts` : un index `currentBarIndex` avance barre par barre, les ordres sont simulés contre les bougies futures, et chaque trade fermé est persisté via l'action `addBacktestTrade` existante. Le replay est accessible depuis un nouveau bouton "Replay Mode" sur la page `/backtest/[id]`.
+**Architecture:** Les données OHLCV M1 sont téléchargées depuis Dukascopy via `dukascopy-node` dans une table `OhlcvBar` dédiée (partagée entre backtests, déduplication par upsert). Avant tout téléchargement, on vérifie les mois déjà présents en DB (`/api/ohlcv/coverage`) pour ne télécharger que les gaps, mois par mois avec barre de progression. Le replay engine tourne 100% côté client avec `lightweight-charts` : un index `currentBarIndex` avance barre par barre, les ordres sont simulés contre les bougies futures, et chaque trade fermé est persisté via Server Action.
 
 **Tech Stack:** `lightweight-charts` (Apache 2.0), `dukascopy-node` (MIT), Next.js Server Actions, Prisma 7, PostgreSQL (Neon)
 
@@ -13,11 +13,13 @@
 - Next.js version: voir `package.json` (Prisma 7, adapter PrismaPg)
 - Prisma client output: `src/generated/prisma`
 - Auth: BetterAuth via `auth.api.getSession({ headers: await headers() })`
-- Pattern Server Actions: fichiers `actions.ts` avec `"use server"` — pas de route API séparée
+- Pattern Server Actions: fichiers `actions.ts` avec `"use server"`
 - Pattern Server Components: pages async avec fetch direct Prisma
 - CSS: variables CSS custom (`var(--bg-card)`, `var(--border)`, `var(--text-primary)`, etc.) — pas de couleurs hardcodées
 - `dukascopy-node` : exécution côté serveur uniquement (Node.js)
-- Instrument mapping Dukascopy: EURUSD → `eurusd`, GBPUSD → `gbpusd`, XAUUSD → `xauusd`, NQ (CFD) → `ustech`, ES (CFD) → `spx500` — les Futures `NQ!`/`ES!` CME utilisent `nq` / `es` (vérifier disponibilité)
+- Instrument mapping Dukascopy: EURUSD → `eurusd`, GBPUSD → `gbpusd`, XAUUSD → `xauusd`, NQ/NQ! → `ustech`, ES/ES! → `spx500`, US100 → `ustech`
+- **Pas de `git commit` dans les steps** — les commits sont faits manuellement par le développeur
+- **Pas de `prisma migrate dev`** — la migration SQL est fournie et exécutée manuellement par le développeur
 
 ---
 
@@ -25,30 +27,30 @@
 
 ### Nouveaux fichiers
 - `prisma/schema.prisma` — ajout modèle `OhlcvBar`
-- `prisma/migrations/` — migration auto-générée
-- `src/app/api/ohlcv/route.ts` — API route GET pour fetcher les bars d'un instrument/période (utilisée par le client replay)
-- `src/app/api/ohlcv/download/route.ts` — API route POST pour déclencher le téléchargement Dukascopy côté serveur
+- `src/app/api/ohlcv/coverage/route.ts` — GET : mois déjà présents en DB pour un instrument/période
+- `src/app/api/ohlcv/download/route.ts` — POST : télécharge 1 mois depuis Dukascopy et upsert
+- `src/app/api/ohlcv/route.ts` — GET : lecture des bars pour le replay
 - `src/app/(app)/backtest/[id]/replay/page.tsx` — page dédiée au replay (full-screen)
-- `src/app/(app)/backtest/[id]/replay/ReplayEngine.tsx` — composant client principal (chart + contrôles)
-- `src/app/(app)/backtest/[id]/replay/useReplayEngine.ts` — hook gérant l'état du replay (index, vitesse, ordres en cours)
-- `src/app/(app)/backtest/[id]/replay/OrderPanel.tsx` — panneau flottant entry/SL/TP affiché après click sur le chart
-- `src/app/(app)/backtest/[id]/replay/TradeResultModal.tsx` — modal post-trade (résultat + champ notes)
-- `src/app/(app)/backtest/[id]/replay/actions.ts` — Server Action `createReplayTrade` (wrapper de `addBacktestTrade`)
+- `src/app/(app)/backtest/[id]/replay/ReplayEngine.tsx` — composant client principal
+- `src/app/(app)/backtest/[id]/replay/useReplayEngine.ts` — hook state machine du replay
+- `src/app/(app)/backtest/[id]/replay/OrderPanel.tsx` — panneau entry/SL/TP
+- `src/app/(app)/backtest/[id]/replay/TradeResultModal.tsx` — modal post-trade + notes
+- `src/app/(app)/backtest/[id]/replay/actions.ts` — Server Action `createReplayTrade`
+- `src/app/(app)/backtest/[id]/OhlcvDataManager.tsx` — composant client : détection gaps + progress bar + bouton Replay
 
 ### Fichiers modifiés
 - `prisma/schema.prisma` — ajout `OhlcvBar`
-- `src/app/(app)/backtest/[id]/page.tsx` — ajout bouton "Replay Mode" → lien vers `/backtest/[id]/replay`
+- `src/app/(app)/backtest/[id]/page.tsx` — ajout `<OhlcvDataManager>` dans la section actions
 
 ---
 
-## Task 1 — Modèle OhlcvBar + migration Prisma
+## Task 1 — Modèle OhlcvBar : schema Prisma + SQL de migration
 
 **Files:**
 - Modify: `prisma/schema.prisma`
-- Run: `npx prisma migrate dev`
 
 **Interfaces:**
-- Produces: table `ohlcv_bar` avec colonnes `(id, instrument, timeframe, timestamp, open, high, low, close, volume)`; index unique `(instrument, timeframe, timestamp)`
+- Produces: table `ohlcv_bar` avec colonnes `(id, instrument, timeframe, timestamp, open, high, low, close, volume)`; contrainte unique `(instrument, timeframe, timestamp)`
 
 - [ ] **Step 1: Ajouter le modèle OhlcvBar dans schema.prisma**
 
@@ -64,10 +66,10 @@ model OhlcvBar {
   timeframe  String  // "m1", "m5", "m15", "h1"
   timestamp  BigInt  // Unix ms UTC
 
-  open  Float
-  high  Float
-  low   Float
-  close Float
+  open   Float
+  high   Float
+  low    Float
+  close  Float
   volume Float @default(0)
 
   @@unique([instrument, timeframe, timestamp])
@@ -76,16 +78,32 @@ model OhlcvBar {
 }
 ```
 
-- [ ] **Step 2: Générer et appliquer la migration**
+- [ ] **Step 2: Exécuter cette migration SQL manuellement dans Neon (console SQL ou psql)**
 
-```bash
-cd /home/gilles/DEV/TRADING/MyJournal
-npx prisma migrate dev --name add_ohlcv_bar
+```sql
+-- Migration : add ohlcv_bar table
+CREATE TABLE IF NOT EXISTS "ohlcv_bar" (
+  "id"         TEXT NOT NULL,
+  "instrument" TEXT NOT NULL,
+  "timeframe"  TEXT NOT NULL,
+  "timestamp"  BIGINT NOT NULL,
+  "open"       DOUBLE PRECISION NOT NULL,
+  "high"       DOUBLE PRECISION NOT NULL,
+  "low"        DOUBLE PRECISION NOT NULL,
+  "close"      DOUBLE PRECISION NOT NULL,
+  "volume"     DOUBLE PRECISION NOT NULL DEFAULT 0,
+
+  CONSTRAINT "ohlcv_bar_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "ohlcv_bar_instrument_timeframe_timestamp_key"
+  ON "ohlcv_bar"("instrument", "timeframe", "timestamp");
+
+CREATE INDEX IF NOT EXISTS "ohlcv_bar_instrument_timeframe_timestamp_idx"
+  ON "ohlcv_bar"("instrument", "timeframe", "timestamp");
 ```
 
-Résultat attendu : `Your database is now in sync with your schema.`
-
-- [ ] **Step 3: Vérifier la génération du client**
+- [ ] **Step 3: Régénérer le client Prisma**
 
 ```bash
 npx prisma generate
@@ -93,35 +111,120 @@ npx prisma generate
 
 Résultat attendu : `Generated Prisma Client` sans erreur.
 
-- [ ] **Step 4: Commit**
+---
+
+## Task 2 — API route : couverture OHLCV en DB
+
+**Files:**
+- Create: `src/app/api/ohlcv/coverage/route.ts`
+
+**Interfaces:**
+- Produces: `GET /api/ohlcv/coverage?instrument=EURUSD&timeframe=m1&from=2025-01-01&to=2025-06-30`
+  → `{ coveredMonths: string[], missingMonths: string[] }` où chaque entrée est `"YYYY-MM"`
+
+- [ ] **Step 1: Créer route.ts**
+
+```typescript
+// src/app/api/ohlcv/coverage/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+
+// Génère la liste de tous les mois "YYYY-MM" entre from et to inclus
+function monthsBetween(from: string, to: string): string[] {
+  const months: string[] = [];
+  const start = new Date(from);
+  const end = new Date(to);
+  const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+  const last = new Date(end.getFullYear(), end.getMonth(), 1);
+
+  while (cur <= last) {
+    months.push(
+      `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}`
+    );
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  return months;
+}
+
+export async function GET(req: NextRequest) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  const instrument = searchParams.get("instrument");
+  const timeframe = searchParams.get("timeframe") ?? "m1";
+  const from = searchParams.get("from"); // "YYYY-MM-DD"
+  const to = searchParams.get("to");     // "YYYY-MM-DD"
+
+  if (!instrument || !from || !to) {
+    return NextResponse.json({ error: "Missing params" }, { status: 400 });
+  }
+
+  const allMonths = monthsBetween(from, to);
+
+  // Pour chaque mois, vérifier si au moins 1 bar existe en DB
+  const checks = await Promise.all(
+    allMonths.map(async (ym) => {
+      const [year, month] = ym.split("-").map(Number);
+      const monthStart = new Date(year, month - 1, 1).getTime();
+      const monthEnd = new Date(year, month, 1).getTime() - 1;
+
+      const count = await prisma.ohlcvBar.count({
+        where: {
+          instrument,
+          timeframe,
+          timestamp: { gte: BigInt(monthStart), lte: BigInt(monthEnd) },
+        },
+      });
+      return { month: ym, covered: count > 0 };
+    })
+  );
+
+  const coveredMonths = checks.filter((c) => c.covered).map((c) => c.month);
+  const missingMonths = checks.filter((c) => !c.covered).map((c) => c.month);
+
+  return NextResponse.json({ coveredMonths, missingMonths });
+}
+```
+
+- [ ] **Step 2: Tester avec curl (après migration Task 1)**
 
 ```bash
-git add prisma/schema.prisma prisma/migrations/
-git commit -m "feat: add OhlcvBar model for replay engine data storage"
+curl "http://localhost:3000/api/ohlcv/coverage?instrument=EURUSD&timeframe=m1&from=2025-01-01&to=2025-03-31"
+```
+
+Résultat attendu (DB vide) :
+```json
+{
+  "coveredMonths": [],
+  "missingMonths": ["2025-01", "2025-02", "2025-03"]
+}
 ```
 
 ---
 
-## Task 2 — API route : téléchargement OHLCV depuis Dukascopy
+## Task 3 — API route : téléchargement OHLCV (1 mois à la fois)
 
 **Files:**
 - Create: `src/app/api/ohlcv/download/route.ts`
 
 **Interfaces:**
-- Consumes: `OhlcvBar` model (Task 1), `dukascopy-node` npm package
-- Produces: `POST /api/ohlcv/download` → `{ inserted: number, skipped: number }`
-- Request body: `{ instrument: string, from: string, to: string, timeframe?: string }`
+- Consumes: `dukascopy-node` npm package, `OhlcvBar` model (Task 1)
+- Produces: `POST /api/ohlcv/download` body `{ instrument, month, timeframe? }` → `{ inserted: number }`
+  - `month` : `"YYYY-MM"` — on télécharge exactement ce mois
+- **Important** : la route télécharge **1 mois seulement** — le client appelle N fois pour N mois manquants
 
 - [ ] **Step 1: Installer dukascopy-node**
 
 ```bash
-cd /home/gilles/DEV/TRADING/MyJournal
 npm install dukascopy-node
 ```
 
-Résultat attendu : package ajouté dans `node_modules`, `package.json` mis à jour.
-
-- [ ] **Step 2: Créer le fichier route.ts**
+- [ ] **Step 2: Créer route.ts**
 
 ```typescript
 // src/app/api/ohlcv/download/route.ts
@@ -131,23 +234,15 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 
-// Map nos noms d'instruments → identifiants Dukascopy
 const INSTRUMENT_MAP: Record<string, string> = {
   EURUSD: "eurusd",
   GBPUSD: "gbpusd",
   XAUUSD: "xauusd",
-  NQ: "ustech",     // NQ CFD
-  ES: "spx500",     // ES CFD
+  NQ: "ustech",
   "NQ!": "ustech",
+  ES: "spx500",
   "ES!": "spx500",
   US100: "ustech",
-};
-
-const TIMEFRAME_MAP: Record<string, string> = {
-  m1: "m1",
-  m5: "m5",
-  m15: "m15",
-  h1: "h1",
 };
 
 export async function POST(req: NextRequest) {
@@ -157,57 +252,57 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { instrument, from, to, timeframe = "m1" } = body as {
+  const { instrument, month, timeframe = "m1" } = body as {
     instrument: string;
-    from: string;   // "YYYY-MM-DD"
-    to: string;     // "YYYY-MM-DD"
+    month: string;      // "YYYY-MM"
     timeframe?: string;
   };
 
   const dukascopyInstrument = INSTRUMENT_MAP[instrument];
   if (!dukascopyInstrument) {
-    return NextResponse.json({ error: `Instrument non supporté: ${instrument}` }, { status: 400 });
+    return NextResponse.json(
+      { error: `Instrument non supporté: ${instrument}` },
+      { status: 400 }
+    );
   }
 
-  const dukascopyTf = TIMEFRAME_MAP[timeframe] ?? "m1";
-
-  const fromDate = new Date(from);
-  const toDate = new Date(to);
+  // Calculer from/to pour ce mois exact
+  const [year, mon] = month.split("-").map(Number);
+  const fromDate = new Date(year, mon - 1, 1);
+  const toDate = new Date(year, mon, 0, 23, 59, 59); // dernier jour du mois
 
   const data = await getHistoricalRates({
     instrument: dukascopyInstrument,
     dates: { from: fromDate, to: toDate },
-    timeframe: dukascopyTf,
+    timeframe,
     format: "array",
     batchSize: 10,
     pauseBetweenBatchesMs: 200,
   });
 
-  // data = [[timestamp, open, high, low, close, volume], ...]
   if (!Array.isArray(data) || data.length === 0) {
-    return NextResponse.json({ inserted: 0, skipped: 0 });
+    return NextResponse.json({ inserted: 0 });
   }
 
-  let inserted = 0;
-  let skipped = 0;
-
-  // Upsert par chunks de 500 pour éviter les timeouts
+  // Upsert par chunks de 500
   const CHUNK = 500;
+  let inserted = 0;
+
   for (let i = 0; i < data.length; i += CHUNK) {
     const chunk = data.slice(i, i + CHUNK);
-    const result = await prisma.$transaction(
+    await prisma.$transaction(
       chunk.map((row: number[]) =>
         prisma.ohlcvBar.upsert({
           where: {
             instrument_timeframe_timestamp: {
               instrument,
-              timeframe: dukascopyTf,
+              timeframe,
               timestamp: BigInt(row[0]),
             },
           },
           create: {
             instrument,
-            timeframe: dukascopyTf,
+            timeframe,
             timestamp: BigInt(row[0]),
             open: row[1],
             high: row[2],
@@ -215,46 +310,39 @@ export async function POST(req: NextRequest) {
             close: row[4],
             volume: row[5] ?? 0,
           },
-          update: {},  // Ne pas écraser si déjà présent
+          update: {}, // ne rien écraser si déjà présent
         })
       )
     );
-    inserted += result.length;
+    inserted += chunk.length;
   }
 
-  return NextResponse.json({ inserted, skipped });
+  return NextResponse.json({ inserted });
 }
 ```
 
-- [ ] **Step 3: Tester manuellement avec curl**
+- [ ] **Step 3: Tester avec curl**
 
 ```bash
 curl -X POST http://localhost:3000/api/ohlcv/download \
   -H "Content-Type: application/json" \
-  -d '{"instrument":"EURUSD","from":"2025-01-06","to":"2025-01-10","timeframe":"m1"}'
+  -d '{"instrument":"EURUSD","month":"2025-01","timeframe":"m1"}'
 ```
 
-Résultat attendu : `{"inserted": <N>, "skipped": 0}` avec N > 0 (environ 2400 bars pour 4 jours de Forex M1).
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add src/app/api/ohlcv/download/route.ts package.json package-lock.json
-git commit -m "feat: API route to download OHLCV from Dukascopy and upsert into OhlcvBar"
-```
+Résultat attendu : `{"inserted": N}` avec N ≈ 29000 (bars M1 de janvier 2025 Forex).
 
 ---
 
-## Task 3 — API route : lecture des bars OHLCV
+## Task 4 — API route : lecture des bars OHLCV
 
 **Files:**
 - Create: `src/app/api/ohlcv/route.ts`
 
 **Interfaces:**
-- Consumes: `OhlcvBar` model (Task 1)
-- Produces: `GET /api/ohlcv?instrument=EURUSD&timeframe=m1&from=<ms>&to=<ms>` → `OhlcvBar[]` sérialisé (timestamps en string car BigInt)
+- Produces: `GET /api/ohlcv?instrument=EURUSD&timeframe=m1&from=<ms>&to=<ms>`
+  → `Array<{ time: number, open, high, low, close, volume }>` (time en secondes UTC)
 
-- [ ] **Step 1: Créer la route GET**
+- [ ] **Step 1: Créer route.ts**
 
 ```typescript
 // src/app/api/ohlcv/route.ts
@@ -272,36 +360,30 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const instrument = searchParams.get("instrument");
   const timeframe = searchParams.get("timeframe") ?? "m1";
-  const from = searchParams.get("from");
-  const to = searchParams.get("to");
+  const from = searchParams.get("from"); // Unix ms string
+  const to = searchParams.get("to");     // Unix ms string
 
   if (!instrument || !from || !to) {
-    return NextResponse.json({ error: "Missing params: instrument, from, to" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Missing params: instrument, from, to" },
+      { status: 400 }
+    );
   }
 
   const bars = await prisma.ohlcvBar.findMany({
     where: {
       instrument,
       timeframe,
-      timestamp: {
-        gte: BigInt(from),
-        lte: BigInt(to),
-      },
+      timestamp: { gte: BigInt(from), lte: BigInt(to) },
     },
     orderBy: { timestamp: "asc" },
-    select: {
-      timestamp: true,
-      open: true,
-      high: true,
-      low: true,
-      close: true,
-      volume: true,
-    },
+    select: { timestamp: true, open: true, high: true, low: true, close: true, volume: true },
   });
 
-  // BigInt n'est pas sérialisable en JSON natif — convertir en string
+  // BigInt non sérialisable — convertir en number
+  // lightweight-charts attend time en secondes UTC
   const serialized = bars.map((b) => ({
-    time: Number(b.timestamp) / 1000, // lightweight-charts attend des secondes UTC
+    time: Number(b.timestamp) / 1000,
     open: b.open,
     high: b.high,
     low: b.low,
@@ -313,7 +395,7 @@ export async function GET(req: NextRequest) {
 }
 ```
 
-- [ ] **Step 2: Tester avec curl (après Task 2 exécutée)**
+- [ ] **Step 2: Tester avec curl (après Task 3)**
 
 ```bash
 FROM=$(date -d "2025-01-06" +%s%3N)
@@ -321,32 +403,247 @@ TO=$(date -d "2025-01-07" +%s%3N)
 curl "http://localhost:3000/api/ohlcv?instrument=EURUSD&timeframe=m1&from=$FROM&to=$TO"
 ```
 
-Résultat attendu : tableau JSON de barres OHLCV avec champs `time, open, high, low, close, volume`.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/app/api/ohlcv/route.ts
-git commit -m "feat: API route GET /api/ohlcv to read OHLCV bars for replay"
-```
+Résultat attendu : tableau JSON `[{ time, open, high, low, close, volume }, ...]`.
 
 ---
 
-## Task 4 — Hook useReplayEngine (state machine du replay)
+## Task 5 — OhlcvDataManager : détection gaps + progress bar + bouton Replay
+
+**Files:**
+- Create: `src/app/(app)/backtest/[id]/OhlcvDataManager.tsx`
+
+**Interfaces:**
+- Consumes: `GET /api/ohlcv/coverage` (Task 2), `POST /api/ohlcv/download` (Task 3)
+- Props:
+  ```typescript
+  {
+    backtestId: string;
+    instrument: string;
+    periodStart: string; // "YYYY-MM-DD"
+    periodEnd: string;   // "YYYY-MM-DD"
+  }
+  ```
+- Comportement :
+  1. Au montage : appelle `/api/ohlcv/coverage` pour obtenir `missingMonths`
+  2. Si `missingMonths.length === 0` → affiche directement le bouton "Replay Mode"
+  3. Si `missingMonths.length > 0` → affiche bouton "Download X months" avec barre de progression mois par mois
+  4. Après téléchargement complet → affiche le bouton "Replay Mode"
+
+- [ ] **Step 1: Créer OhlcvDataManager.tsx**
+
+```typescript
+// src/app/(app)/backtest/[id]/OhlcvDataManager.tsx
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
+import { Download, Play, Check, AlertCircle, Loader2 } from "lucide-react";
+
+type Props = {
+  backtestId: string;
+  instrument: string;
+  periodStart: string;
+  periodEnd: string;
+};
+
+type CoverageState =
+  | { status: "loading" }
+  | { status: "ready" }                                   // toutes les data présentes
+  | { status: "needs-download"; missingMonths: string[] } // gaps à télécharger
+  | { status: "downloading"; missingMonths: string[]; doneCount: number }
+  | { status: "done" }
+  | { status: "error"; message: string };
+
+export function OhlcvDataManager({ backtestId, instrument, periodStart, periodEnd }: Props) {
+  const [state, setState] = useState<CoverageState>({ status: "loading" });
+
+  const checkCoverage = useCallback(async () => {
+    setState({ status: "loading" });
+    try {
+      const res = await fetch(
+        `/api/ohlcv/coverage?instrument=${instrument}&timeframe=m1&from=${periodStart}&to=${periodEnd}`
+      );
+      if (!res.ok) throw new Error("Coverage check failed");
+      const { missingMonths } = await res.json() as { coveredMonths: string[]; missingMonths: string[] };
+
+      if (missingMonths.length === 0) {
+        setState({ status: "ready" });
+      } else {
+        setState({ status: "needs-download", missingMonths });
+      }
+    } catch (e) {
+      setState({ status: "error", message: e instanceof Error ? e.message : "Unknown error" });
+    }
+  }, [instrument, periodStart, periodEnd]);
+
+  useEffect(() => {
+    checkCoverage();
+  }, [checkCoverage]);
+
+  async function handleDownload() {
+    if (state.status !== "needs-download") return;
+    const { missingMonths } = state;
+
+    setState({ status: "downloading", missingMonths, doneCount: 0 });
+
+    for (let i = 0; i < missingMonths.length; i++) {
+      const month = missingMonths[i];
+      try {
+        const res = await fetch("/api/ohlcv/download", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ instrument, month, timeframe: "m1" }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          setState({ status: "error", message: err.error ?? `Failed on ${month}` });
+          return;
+        }
+      } catch {
+        setState({ status: "error", message: `Network error on ${month}` });
+        return;
+      }
+      setState({ status: "downloading", missingMonths, doneCount: i + 1 });
+    }
+
+    setState({ status: "done" });
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
+  if (state.status === "loading") {
+    return (
+      <div className="flex items-center gap-2 text-sm" style={{ color: "var(--text-muted)" }}>
+        <Loader2 size={13} className="animate-spin" />
+        Checking data…
+      </div>
+    );
+  }
+
+  if (state.status === "error") {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="flex items-center gap-1.5 text-sm" style={{ color: "#ef4444" }}>
+          <AlertCircle size={13} /> {state.message}
+        </span>
+        <button
+          onClick={checkCoverage}
+          className="rounded-lg px-2 py-1 text-xs"
+          style={{ backgroundColor: "var(--bg-surface)", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (state.status === "ready" || state.status === "done") {
+    return (
+      <Link
+        href={`/backtest/${backtestId}/replay`}
+        className="flex items-center gap-2 rounded-xl px-4 py-1.5 text-sm font-bold"
+        style={{ backgroundColor: "#6366f1", color: "#fff" }}
+      >
+        <Play size={13} /> Replay Mode
+      </Link>
+    );
+  }
+
+  if (state.status === "needs-download") {
+    const { missingMonths } = state;
+    return (
+      <button
+        onClick={handleDownload}
+        className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-semibold"
+        style={{ backgroundColor: "var(--bg-surface)", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+      >
+        <Download size={13} />
+        Download {missingMonths.length} month{missingMonths.length > 1 ? "s" : ""} to enable Replay
+      </button>
+    );
+  }
+
+  // status === "downloading"
+  if (state.status === "downloading") {
+    const { missingMonths, doneCount } = state;
+    const total = missingMonths.length;
+    const pct = Math.round((doneCount / total) * 100);
+    const currentMonth = missingMonths[doneCount] ?? missingMonths[total - 1];
+
+    return (
+      <div className="flex flex-col gap-1.5 min-w-[220px]">
+        <div className="flex items-center justify-between text-xs" style={{ color: "var(--text-muted)" }}>
+          <span className="flex items-center gap-1.5">
+            <Loader2 size={11} className="animate-spin" />
+            {currentMonth}…
+          </span>
+          <span className="font-mono font-bold" style={{ color: "var(--text-primary)" }}>
+            {doneCount}/{total} ({pct}%)
+          </span>
+        </div>
+        {/* Progress bar */}
+        <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ backgroundColor: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+          <div
+            className="h-full rounded-full transition-all duration-300"
+            style={{ width: `${pct}%`, backgroundColor: "#6366f1" }}
+          />
+        </div>
+        <div className="flex items-center gap-1 text-xs" style={{ color: "var(--text-muted)" }}>
+          {missingMonths.slice(0, doneCount).map((m) => (
+            <span key={m} className="flex items-center gap-0.5" style={{ color: "#22c55e" }}>
+              <Check size={10} /> {m}
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+```
+
+- [ ] **Step 2: Modifier `src/app/(app)/backtest/[id]/page.tsx`**
+
+Ajouter l'import en haut du fichier :
+```typescript
+import { OhlcvDataManager } from "./OhlcvDataManager";
+```
+
+Dans la section `{/* Actions */}` (ligne ~106), ajouter **avant** `<DeleteButton>` :
+```tsx
+<OhlcvDataManager
+  backtestId={id}
+  instrument={backtest.instrument}
+  periodStart={backtest.periodStart.toISOString().slice(0, 10)}
+  periodEnd={backtest.periodEnd.toISOString().slice(0, 10)}
+/>
+```
+
+- [ ] **Step 3: Vérifier la compilation TypeScript**
+
+```bash
+npx tsc --noEmit
+```
+
+Résultat attendu : 0 erreurs.
+
+---
+
+## Task 6 — Hook useReplayEngine (state machine du replay)
 
 **Files:**
 - Create: `src/app/(app)/backtest/[id]/replay/useReplayEngine.ts`
 
 **Interfaces:**
-- Consumes: `OhlcvBar` serialisé `{ time: number, open, high, low, close, volume }[]`
-- Produces: hook `useReplayEngine(bars, opts)` retournant:
+- Produces: hook `useReplayEngine(bars, opts)` et types `Bar`, `PendingOrder`, `FilledTrade`
   ```typescript
   {
-    visibleBars: Bar[];         // bougies révélées jusqu'à currentIndex
+    visibleBars: Bar[];
     currentIndex: number;
-    currentBar: Bar | null;     // bougie courante
+    currentBar: Bar | null;
     isPlaying: boolean;
-    speed: number;              // 1 | 2 | 5 | 10 (bougies/seconde)
+    speed: number;              // 1 | 2 | 5 | 10
     pendingOrder: PendingOrder | null;
     play: () => void;
     pause: () => void;
@@ -359,7 +656,7 @@ git commit -m "feat: API route GET /api/ohlcv to read OHLCV bars for replay"
   }
   ```
 
-- [ ] **Step 1: Définir les types et créer le hook**
+- [ ] **Step 1: Créer useReplayEngine.ts**
 
 ```typescript
 // src/app/(app)/backtest/[id]/replay/useReplayEngine.ts
@@ -368,7 +665,7 @@ git commit -m "feat: API route GET /api/ohlcv to read OHLCV bars for replay"
 import { useState, useEffect, useRef, useCallback } from "react";
 
 export type Bar = {
-  time: number;   // Unix secondes
+  time: number;   // Unix secondes UTC
   open: number;
   high: number;
   low: number;
@@ -389,7 +686,7 @@ export type FilledTrade = {
   entryBar: Bar;
   exitBar: Bar;
   exitPrice: number;
-  outcome: "WIN" | "LOSS" | "BREAKEVEN";
+  outcome: "WIN" | "LOSS";
   rMultiple: number;
   pnlPoints: number;
 };
@@ -398,11 +695,10 @@ type UseReplayEngineOpts = {
   onTradeFilled: (trade: FilledTrade) => void;
 };
 
-export function useReplayEngine(
-  bars: Bar[],
-  { onTradeFilled }: UseReplayEngineOpts
-) {
-  const [currentIndex, setCurrentIndex] = useState(50); // démarre avec 50 bougies visibles
+const MIN_START_INDEX = 50; // bougies visibles au démarrage
+
+export function useReplayEngine(bars: Bar[], { onTradeFilled }: UseReplayEngineOpts) {
+  const [currentIndex, setCurrentIndex] = useState(MIN_START_INDEX);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
@@ -414,60 +710,47 @@ export function useReplayEngine(
   const visibleBars = bars.slice(0, currentIndex + 1);
   const currentBar = bars[currentIndex] ?? null;
 
-  // Vérifie si un ordre pending est déclenché par la bougie `bar`
   const checkOrderFill = useCallback(
-    (bar: Bar, idx: number) => {
+    (bar: Bar) => {
       const order = pendingOrderRef.current;
       if (!order) return;
 
       const { direction, entryPrice, stopLoss, takeProfit } = order;
-
       let exitPrice: number | null = null;
-      let outcome: "WIN" | "LOSS" | "BREAKEVEN" | null = null;
+      let outcome: "WIN" | "LOSS" | null = null;
 
       if (direction === "LONG") {
-        if (bar.low <= stopLoss) {
-          exitPrice = stopLoss;
-          outcome = "LOSS";
-        } else if (bar.high >= takeProfit) {
-          exitPrice = takeProfit;
-          outcome = "WIN";
-        }
+        if (bar.low <= stopLoss)       { exitPrice = stopLoss;   outcome = "LOSS"; }
+        else if (bar.high >= takeProfit) { exitPrice = takeProfit; outcome = "WIN";  }
       } else {
-        if (bar.high >= stopLoss) {
-          exitPrice = stopLoss;
-          outcome = "LOSS";
-        } else if (bar.low <= takeProfit) {
-          exitPrice = takeProfit;
-          outcome = "WIN";
-        }
+        if (bar.high >= stopLoss)      { exitPrice = stopLoss;   outcome = "LOSS"; }
+        else if (bar.low <= takeProfit)  { exitPrice = takeProfit; outcome = "WIN";  }
       }
 
-      if (exitPrice !== null && outcome !== null) {
-        const risk = Math.abs(entryPrice - stopLoss);
-        const reward = exitPrice - entryPrice;
-        const rMultiple =
-          direction === "LONG"
-            ? (exitPrice - entryPrice) / risk
-            : (entryPrice - exitPrice) / risk;
-        const pnlPoints =
-          direction === "LONG"
-            ? exitPrice - entryPrice
-            : entryPrice - exitPrice;
+      if (exitPrice === null || outcome === null) return;
 
-        const filled: FilledTrade = {
-          order,
-          entryBar: bars[order.entryBarIndex],
-          exitBar: bar,
-          exitPrice,
-          outcome,
-          rMultiple: Math.round(rMultiple * 100) / 100,
-          pnlPoints: Math.round(pnlPoints * 10000) / 10000,
-        };
+      const risk = Math.abs(entryPrice - stopLoss);
+      const rMultiple =
+        direction === "LONG"
+          ? (exitPrice - entryPrice) / risk
+          : (entryPrice - exitPrice) / risk;
+      const pnlPoints =
+        direction === "LONG"
+          ? exitPrice - entryPrice
+          : entryPrice - exitPrice;
 
-        setPendingOrder(null);
-        onTradeFilled(filled);
-      }
+      const filled: FilledTrade = {
+        order,
+        entryBar: bars[order.entryBarIndex],
+        exitBar: bar,
+        exitPrice,
+        outcome,
+        rMultiple: Math.round(rMultiple * 100) / 100,
+        pnlPoints: Math.round(pnlPoints * 10000) / 10000,
+      };
+
+      setPendingOrder(null);
+      onTradeFilled(filled);
     },
     [bars, onTradeFilled]
   );
@@ -475,45 +758,36 @@ export function useReplayEngine(
   const stepForward = useCallback(() => {
     setCurrentIndex((prev) => {
       const next = Math.min(prev + 1, bars.length - 1);
-      if (next !== prev) {
-        checkOrderFill(bars[next], next);
-      }
+      if (next !== prev) checkOrderFill(bars[next]);
       return next;
     });
   }, [bars, checkOrderFill]);
 
   const stepBackward = useCallback(() => {
-    setCurrentIndex((prev) => Math.max(prev - 1, 50));
+    setCurrentIndex((prev) => Math.max(prev - 1, MIN_START_INDEX));
     setPendingOrder(null);
   }, []);
 
-  const jumpTo = useCallback((index: number) => {
-    setCurrentIndex(Math.max(50, Math.min(index, bars.length - 1)));
-    setPendingOrder(null);
-  }, [bars.length]);
+  const jumpTo = useCallback(
+    (index: number) => {
+      setCurrentIndex(Math.max(MIN_START_INDEX, Math.min(index, bars.length - 1)));
+      setPendingOrder(null);
+    },
+    [bars.length]
+  );
 
   const play = useCallback(() => setIsPlaying(true), []);
   const pause = useCallback(() => setIsPlaying(false), []);
+  const placeOrder = useCallback((order: PendingOrder) => setPendingOrder(order), []);
+  const cancelOrder = useCallback(() => setPendingOrder(null), []);
 
-  const placeOrder = useCallback((order: PendingOrder) => {
-    setPendingOrder(order);
-  }, []);
-
-  const cancelOrder = useCallback(() => {
-    setPendingOrder(null);
-  }, []);
-
-  // Autoplay loop
   useEffect(() => {
     if (!isPlaying) {
       if (intervalRef.current) clearInterval(intervalRef.current);
       return;
     }
-    const ms = Math.round(1000 / speed);
-    intervalRef.current = setInterval(stepForward, ms);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    intervalRef.current = setInterval(stepForward, Math.round(1000 / speed));
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isPlaying, speed, stepForward]);
 
   return {
@@ -535,31 +809,16 @@ export function useReplayEngine(
 }
 ```
 
-- [ ] **Step 2: Commit**
-
-```bash
-git add src/app/(app)/backtest/[id]/replay/useReplayEngine.ts
-git commit -m "feat: useReplayEngine hook — state machine for bar-by-bar replay with order simulation"
-```
-
 ---
 
-## Task 5 — OrderPanel : panneau de saisie entry/SL/TP
+## Task 7 — OrderPanel : panneau de saisie entry/SL/TP
 
 **Files:**
 - Create: `src/app/(app)/backtest/[id]/replay/OrderPanel.tsx`
 
 **Interfaces:**
-- Consumes: `PendingOrder` type (Task 4), `currentBar: Bar` (Task 4)
-- Produces: composant `<OrderPanel>` avec props:
-  ```typescript
-  {
-    currentPrice: number;
-    onConfirm: (order: PendingOrder) => void;
-    onCancel: () => void;
-    currentBarIndex: number;
-  }
-  ```
+- Consumes: `PendingOrder` (Task 6)
+- Props: `{ currentPrice: number; currentBarIndex: number; onConfirm: (order: PendingOrder) => void; onCancel: () => void }`
 
 - [ ] **Step 1: Créer OrderPanel.tsx**
 
@@ -601,37 +860,27 @@ export function OrderPanel({ currentPrice, currentBarIndex, onConfirm, onCancel 
         Place Order
       </p>
 
-      {/* Direction toggle */}
       <div className="mb-3 flex gap-2">
-        <button
-          type="button"
-          onClick={() => setDirection("LONG")}
-          className="flex-1 rounded-xl py-2 text-sm font-bold transition-all"
-          style={{
-            backgroundColor: direction === "LONG" ? "#22c55e" : "var(--bg-surface)",
-            color: direction === "LONG" ? "#fff" : "var(--text-muted)",
-            border: "1px solid var(--border)",
-          }}
-        >
-          LONG ▲
-        </button>
-        <button
-          type="button"
-          onClick={() => setDirection("SHORT")}
-          className="flex-1 rounded-xl py-2 text-sm font-bold transition-all"
-          style={{
-            backgroundColor: direction === "SHORT" ? "#ef4444" : "var(--bg-surface)",
-            color: direction === "SHORT" ? "#fff" : "var(--text-muted)",
-            border: "1px solid var(--border)",
-          }}
-        >
-          SHORT ▼
-        </button>
+        {(["LONG", "SHORT"] as const).map((d) => (
+          <button
+            key={d}
+            type="button"
+            onClick={() => setDirection(d)}
+            className="flex-1 rounded-xl py-2 text-sm font-bold transition-all"
+            style={{
+              backgroundColor: direction === d ? (d === "LONG" ? "#22c55e" : "#ef4444") : "var(--bg-surface)",
+              color: direction === d ? "#fff" : "var(--text-muted)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            {d === "LONG" ? "LONG ▲" : "SHORT ▼"}
+          </button>
+        ))}
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-2">
         {[
-          { label: "Entry", value: entryPrice, onChange: setEntryPrice },
+          { label: "Entry", value: entryPrice, onChange: setEntryPrice, placeholder: "" },
           { label: "Stop Loss", value: stopLoss, onChange: setStopLoss, placeholder: direction === "LONG" ? "< entry" : "> entry" },
           { label: "Take Profit", value: takeProfit, onChange: setTakeProfit, placeholder: direction === "LONG" ? "> entry" : "< entry" },
         ].map(({ label, value, onChange, placeholder }) => (
@@ -644,11 +893,7 @@ export function OrderPanel({ currentPrice, currentBarIndex, onConfirm, onCancel 
               onChange={(e) => onChange(e.target.value)}
               placeholder={placeholder}
               className="w-full rounded-lg px-3 py-1.5 text-sm"
-              style={{
-                backgroundColor: "var(--bg-surface)",
-                border: "1px solid var(--border)",
-                color: "var(--text-primary)",
-              }}
+              style={{ backgroundColor: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
             />
           </div>
         ))}
@@ -676,31 +921,16 @@ export function OrderPanel({ currentPrice, currentBarIndex, onConfirm, onCancel 
 }
 ```
 
-- [ ] **Step 2: Commit**
-
-```bash
-git add src/app/(app)/backtest/[id]/replay/OrderPanel.tsx
-git commit -m "feat: OrderPanel component for entry/SL/TP order placement in replay"
-```
-
 ---
 
-## Task 6 — TradeResultModal : modal post-trade avec notes
+## Task 8 — TradeResultModal : modal post-trade avec notes
 
 **Files:**
 - Create: `src/app/(app)/backtest/[id]/replay/TradeResultModal.tsx`
 
 **Interfaces:**
-- Consumes: `FilledTrade` type (Task 4)
-- Produces: composant `<TradeResultModal>` avec props:
-  ```typescript
-  {
-    trade: FilledTrade;
-    onSave: (notes: string) => void;
-    onDiscard: () => void;
-    isSaving: boolean;
-  }
-  ```
+- Consumes: `FilledTrade` (Task 6)
+- Props: `{ trade: FilledTrade; onSave: (notes: string) => void; onDiscard: () => void; isSaving: boolean }`
 
 - [ ] **Step 1: Créer TradeResultModal.tsx**
 
@@ -723,10 +953,9 @@ export function TradeResultModal({ trade, onSave, onDiscard, isSaving }: Props) 
 
   const isWin = trade.outcome === "WIN";
   const outcomeColor = isWin ? "#22c55e" : "#ef4444";
-  const outcomeLabel = isWin ? "WIN" : "LOSS";
 
-  const entryDate = new Date(trade.entryBar.time * 1000).toUTCString().slice(0, 22);
-  const exitDate = new Date(trade.exitBar.time * 1000).toUTCString().slice(0, 22);
+  const fmt = (ts: number) =>
+    new Date(ts * 1000).toUTCString().slice(0, 22);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -734,28 +963,26 @@ export function TradeResultModal({ trade, onSave, onDiscard, isSaving }: Props) 
         className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
         style={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border)" }}
       >
-        {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>
-            Trade {outcomeLabel}
+            Trade {trade.outcome}
           </h2>
           <span className="text-2xl font-black" style={{ color: outcomeColor }}>
             {trade.rMultiple > 0 ? "+" : ""}{trade.rMultiple}R
           </span>
         </div>
 
-        {/* Stats grid */}
         <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
-          {[
+          {([
             ["Direction", trade.order.direction],
-            ["Entry", trade.order.entryPrice.toFixed(5)],
-            ["Exit", trade.exitPrice.toFixed(5)],
-            ["SL", trade.order.stopLoss.toFixed(5)],
-            ["TP", trade.order.takeProfit.toFixed(5)],
-            ["P&L pts", trade.pnlPoints > 0 ? `+${trade.pnlPoints.toFixed(4)}` : trade.pnlPoints.toFixed(4)],
-            ["Entry date", entryDate],
-            ["Exit date", exitDate],
-          ].map(([label, value]) => (
+            ["Entry",     trade.order.entryPrice.toFixed(5)],
+            ["Exit",      trade.exitPrice.toFixed(5)],
+            ["SL",        trade.order.stopLoss.toFixed(5)],
+            ["TP",        trade.order.takeProfit.toFixed(5)],
+            ["P&L pts",   (trade.pnlPoints > 0 ? "+" : "") + trade.pnlPoints.toFixed(4)],
+            ["Entry date", fmt(trade.entryBar.time)],
+            ["Exit date",  fmt(trade.exitBar.time)],
+          ] as [string, string][]).map(([label, value]) => (
             <div key={label} className="rounded-lg px-3 py-2" style={{ backgroundColor: "var(--bg-surface)" }}>
               <p className="text-xs" style={{ color: "var(--text-muted)" }}>{label}</p>
               <p className="font-semibold" style={{ color: "var(--text-primary)" }}>{value}</p>
@@ -763,7 +990,6 @@ export function TradeResultModal({ trade, onSave, onDiscard, isSaving }: Props) 
           ))}
         </div>
 
-        {/* Notes */}
         <div className="mb-4">
           <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
             Notes (optionnel — PD Array HTF, structure…)
@@ -772,17 +998,12 @@ export function TradeResultModal({ trade, onSave, onDiscard, isSaving }: Props) 
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={3}
-            className="w-full rounded-xl px-3 py-2 text-sm resize-none"
-            style={{
-              backgroundColor: "var(--bg-surface)",
-              border: "1px solid var(--border)",
-              color: "var(--text-primary)",
-            }}
-            placeholder="ex: OB H4 respecté, FVG H1 comblé, Silver Bullet 10h..."
+            className="w-full resize-none rounded-xl px-3 py-2 text-sm"
+            style={{ backgroundColor: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+            placeholder="ex: OB H4 respecté, FVG H1 comblé, Silver Bullet 10h…"
           />
         </div>
 
-        {/* Actions */}
         <div className="flex gap-3">
           <button
             onClick={() => onSave(notes)}
@@ -807,23 +1028,16 @@ export function TradeResultModal({ trade, onSave, onDiscard, isSaving }: Props) 
 }
 ```
 
-- [ ] **Step 2: Commit**
-
-```bash
-git add src/app/(app)/backtest/[id]/replay/TradeResultModal.tsx
-git commit -m "feat: TradeResultModal with optional notes field for post-trade journaling"
-```
-
 ---
 
-## Task 7 — Server Action createReplayTrade
+## Task 9 — Server Action createReplayTrade
 
 **Files:**
 - Create: `src/app/(app)/backtest/[id]/replay/actions.ts`
 
 **Interfaces:**
-- Consumes: `addBacktestTrade` depuis `src/app/(app)/backtest/actions.ts`, `FilledTrade` type (Task 4)
-- Produces: `createReplayTrade(backtestId, trade, notes) => Promise<string>` (retourne l'ID du trade créé)
+- Consumes: `FilledTrade` (Task 6), `prisma.backtestTrade.create`
+- Produces: `createReplayTrade(backtestId: string, trade: FilledTrade, notes: string) => Promise<string>`
 
 - [ ] **Step 1: Créer actions.ts**
 
@@ -832,10 +1046,10 @@ git commit -m "feat: TradeResultModal with optional notes field for post-trade j
 "use server";
 
 import { headers } from "next/headers";
-import { prisma } from "@/lib/prisma";
-import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
 import type { FilledTrade } from "./useReplayEngine";
 
 export async function createReplayTrade(
@@ -854,24 +1068,21 @@ export async function createReplayTrade(
 
   const count = await prisma.backtestTrade.count({ where: { backtestId } });
 
-  const direction = trade.order.direction === "LONG" ? "LONG" : "SHORT";
-  const outcome = trade.outcome === "WIN" ? "WIN" : "LOSS";
-
   const created = await prisma.backtestTrade.create({
     data: {
       backtestId,
-      tradeNumber: count + 1,
-      direction,
-      outcome,
-      entryDate: new Date(trade.entryBar.time * 1000),
-      exitDate: new Date(trade.exitBar.time * 1000),
-      entryPrice: trade.order.entryPrice,
-      exitPrice: trade.exitPrice,
-      stopLoss: trade.order.stopLoss,
-      takeProfit: trade.order.takeProfit,
-      rMultiple: trade.rMultiple,
-      pnlPoints: trade.pnlPoints,
-      notes: notes.trim() || null,
+      tradeNumber:  count + 1,
+      direction:    trade.order.direction,
+      outcome:      trade.outcome,
+      entryDate:    new Date(trade.entryBar.time * 1000),
+      exitDate:     new Date(trade.exitBar.time * 1000),
+      entryPrice:   trade.order.entryPrice,
+      exitPrice:    trade.exitPrice,
+      stopLoss:     trade.order.stopLoss,
+      takeProfit:   trade.order.takeProfit,
+      rMultiple:    trade.rMultiple,
+      pnlPoints:    trade.pnlPoints,
+      notes:        notes.trim() || null,
     },
     select: { id: true },
   });
@@ -881,23 +1092,16 @@ export async function createReplayTrade(
 }
 ```
 
-- [ ] **Step 2: Commit**
-
-```bash
-git add src/app/(app)/backtest/[id]/replay/actions.ts
-git commit -m "feat: createReplayTrade server action to persist replay trades as BacktestTrade"
-```
-
 ---
 
-## Task 8 — ReplayEngine : composant chart principal
+## Task 10 — ReplayEngine : composant chart principal
 
 **Files:**
 - Create: `src/app/(app)/backtest/[id]/replay/ReplayEngine.tsx`
 
 **Interfaces:**
-- Consumes: `useReplayEngine` (Task 4), `OrderPanel` (Task 5), `TradeResultModal` (Task 6), `createReplayTrade` (Task 7), `Bar` type (Task 4), `lightweight-charts` npm package
-- Produces: composant client `<ReplayEngine backtestId instrument initialBars />` — chart full-screen avec contrôles de replay
+- Consumes: `useReplayEngine` (Task 6), `OrderPanel` (Task 7), `TradeResultModal` (Task 8), `createReplayTrade` (Task 9), `lightweight-charts`
+- Props: `{ backtestId: string; instrument: string; initialBars: Bar[] }`
 
 - [ ] **Step 1: Installer lightweight-charts**
 
@@ -923,6 +1127,8 @@ import { useReplayEngine, type Bar, type FilledTrade } from "./useReplayEngine";
 import { OrderPanel } from "./OrderPanel";
 import { TradeResultModal } from "./TradeResultModal";
 import { createReplayTrade } from "./actions";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 
 type Props = {
   backtestId: string;
@@ -945,7 +1151,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars }: Props) {
 
   const engine = useReplayEngine(initialBars, { onTradeFilled: handleTradeFilled });
 
-  // Initialiser le chart
+  // Init chart
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
@@ -959,62 +1165,50 @@ export function ReplayEngine({ backtestId, instrument, initialBars }: Props) {
         horzLines: { color: "#1f2937" },
       },
       crosshair: { mode: 1 },
-      width: chartContainerRef.current.clientWidth,
+      width:  chartContainerRef.current.clientWidth,
       height: chartContainerRef.current.clientHeight,
     });
 
     const series = chart.addCandlestickSeries({
-      upColor: "#22c55e",
-      downColor: "#ef4444",
-      borderUpColor: "#22c55e",
-      borderDownColor: "#ef4444",
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
+      upColor:        "#22c55e",
+      downColor:      "#ef4444",
+      borderUpColor:  "#22c55e",
+      borderDownColor:"#ef4444",
+      wickUpColor:    "#22c55e",
+      wickDownColor:  "#ef4444",
     });
 
     chartRef.current = chart;
     seriesRef.current = series;
 
-    const resizeObserver = new ResizeObserver(() => {
+    const ro = new ResizeObserver(() => {
       if (chartContainerRef.current) {
         chart.applyOptions({
-          width: chartContainerRef.current.clientWidth,
+          width:  chartContainerRef.current.clientWidth,
           height: chartContainerRef.current.clientHeight,
         });
       }
     });
-    resizeObserver.observe(chartContainerRef.current);
+    ro.observe(chartContainerRef.current);
 
-    return () => {
-      resizeObserver.disconnect();
-      chart.remove();
-    };
+    return () => { ro.disconnect(); chart.remove(); };
   }, []);
 
-  // Mettre à jour les données visibles à chaque avance de barre
+  // Mettre à jour le chart à chaque nouvelle bougie
   useEffect(() => {
     if (!seriesRef.current) return;
     const data: CandlestickData[] = engine.visibleBars.map((b) => ({
-      time: b.time as number,
-      open: b.open,
-      high: b.high,
-      low: b.low,
+      time:  b.time as number,
+      open:  b.open,
+      high:  b.high,
+      low:   b.low,
       close: b.close,
     }));
     seriesRef.current.setData(data);
-    // Scroll automatique à la dernière bougie
     if (chartRef.current && data.length > 0) {
       chartRef.current.timeScale().scrollToPosition(5, false);
     }
   }, [engine.visibleBars]);
-
-  // Ligne de prix entry/SL/TP si ordre pending
-  useEffect(() => {
-    if (!seriesRef.current) return;
-    // On retire les anciennes price lines avant d'en ajouter de nouvelles
-    // lightweight-charts gère ça via createPriceLine/removePriceLine
-    // Pour simplifier : recréer à chaque changement d'ordre
-  }, [engine.pendingOrder]);
 
   async function handleSaveTrade(notes: string) {
     if (!pendingTrade) return;
@@ -1033,69 +1227,75 @@ export function ReplayEngine({ backtestId, instrument, initialBars }: Props) {
     <div className="relative flex h-screen w-full flex-col" style={{ backgroundColor: "#0f1117" }}>
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2" style={{ borderBottom: "1px solid #1f2937" }}>
+        <Link
+          href={`/backtest/${backtestId}`}
+          className="flex h-7 w-7 items-center justify-center rounded-lg"
+          style={{ backgroundColor: "#1f2937", color: "#9ca3af" }}
+        >
+          <ArrowLeft size={14} />
+        </Link>
+
         <span className="text-sm font-bold" style={{ color: "#a5b4fc" }}>{instrument}</span>
         <span className="text-sm" style={{ color: "#6b7280" }}>
           {engine.currentBar
             ? new Date(engine.currentBar.time * 1000).toUTCString().slice(0, 22)
             : "—"}
         </span>
-        <span className="ml-auto text-sm font-mono" style={{ color: "#f9fafb" }}>
+        <span className="font-mono text-sm" style={{ color: "#f9fafb" }}>
           {currentPrice.toFixed(5)}
         </span>
 
-        {/* Speed selector */}
-        <div className="flex gap-1">
-          {[1, 2, 5, 10].map((s) => (
+        <div className="ml-auto flex items-center gap-3">
+          {/* Speed */}
+          <div className="flex gap-1">
+            {[1, 2, 5, 10].map((s) => (
+              <button
+                key={s}
+                onClick={() => engine.setSpeed(s)}
+                className="rounded-lg px-2 py-1 text-xs font-bold"
+                style={{
+                  backgroundColor: engine.speed === s ? "#6366f1" : "#1f2937",
+                  color: engine.speed === s ? "#fff" : "#9ca3af",
+                }}
+              >
+                {s}x
+              </button>
+            ))}
+          </div>
+
+          {/* Playback */}
+          <div className="flex gap-1">
             <button
-              key={s}
-              onClick={() => engine.setSpeed(s)}
-              className="rounded-lg px-2 py-1 text-xs font-bold transition-all"
-              style={{
-                backgroundColor: engine.speed === s ? "#6366f1" : "#1f2937",
-                color: engine.speed === s ? "#fff" : "#9ca3af",
-              }}
+              onClick={engine.stepBackward}
+              className="rounded-lg px-3 py-1.5 text-sm"
+              style={{ backgroundColor: "#1f2937", color: "#9ca3af" }}
+              title="← 1 bougie"
+            >◀</button>
+            <button
+              onClick={engine.isPlaying ? engine.pause : engine.play}
+              className="rounded-lg px-4 py-1.5 text-sm font-bold"
+              style={{ backgroundColor: engine.isPlaying ? "#ef4444" : "#22c55e", color: "#fff" }}
             >
-              {s}x
+              {engine.isPlaying ? "⏸ Pause" : "▶ Play"}
             </button>
-          ))}
-        </div>
+            <button
+              onClick={engine.stepForward}
+              className="rounded-lg px-3 py-1.5 text-sm"
+              style={{ backgroundColor: "#1f2937", color: "#9ca3af" }}
+              title="1 bougie →"
+            >▶</button>
+          </div>
 
-        {/* Playback controls */}
-        <div className="flex gap-1">
+          {/* Order */}
           <button
-            onClick={engine.stepBackward}
-            className="rounded-lg px-3 py-1.5 text-sm"
-            style={{ backgroundColor: "#1f2937", color: "#9ca3af" }}
-            title="Reculer 1 bougie"
+            onClick={() => { engine.pause(); setShowOrderPanel(true); }}
+            disabled={!!engine.pendingOrder}
+            className="rounded-xl px-4 py-1.5 text-sm font-bold disabled:opacity-50"
+            style={{ backgroundColor: "#6366f1", color: "#fff" }}
           >
-            ◀
-          </button>
-          <button
-            onClick={engine.isPlaying ? engine.pause : engine.play}
-            className="rounded-lg px-4 py-1.5 text-sm font-bold"
-            style={{ backgroundColor: engine.isPlaying ? "#ef4444" : "#22c55e", color: "#fff" }}
-          >
-            {engine.isPlaying ? "⏸ Pause" : "▶ Play"}
-          </button>
-          <button
-            onClick={engine.stepForward}
-            className="rounded-lg px-3 py-1.5 text-sm"
-            style={{ backgroundColor: "#1f2937", color: "#9ca3af" }}
-            title="Avancer 1 bougie"
-          >
-            ▶
+            {engine.pendingOrder ? "Order Active" : "+ Order"}
           </button>
         </div>
-
-        {/* Order button */}
-        <button
-          onClick={() => { engine.pause(); setShowOrderPanel(true); }}
-          className="rounded-xl px-4 py-1.5 text-sm font-bold"
-          style={{ backgroundColor: "#6366f1", color: "#fff" }}
-          disabled={!!engine.pendingOrder}
-        >
-          {engine.pendingOrder ? "Order Active" : "+ Order"}
-        </button>
       </div>
 
       {/* Chart */}
@@ -1129,23 +1329,16 @@ export function ReplayEngine({ backtestId, instrument, initialBars }: Props) {
 }
 ```
 
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/app/(app)/backtest/[id]/replay/ReplayEngine.tsx package.json package-lock.json
-git commit -m "feat: ReplayEngine client component with lightweight-charts, playback controls, and order UI"
-```
-
 ---
 
-## Task 9 — Page replay + chargement des données
+## Task 11 — Page replay
 
 **Files:**
 - Create: `src/app/(app)/backtest/[id]/replay/page.tsx`
 
 **Interfaces:**
-- Consumes: `ReplayEngine` (Task 8), `OhlcvBar` via API route GET (Task 3), `Backtest` model via Prisma
-- Produces: page server component `/backtest/[id]/replay` avec formulaire de sélection de période + chargement des bars
+- Consumes: `ReplayEngine` (Task 10), `OhlcvBar` via Prisma, `Backtest` via Prisma
+- Produces: page server `/backtest/[id]/replay` avec formulaire de sélection de période
 
 - [ ] **Step 1: Créer page.tsx**
 
@@ -1178,16 +1371,19 @@ export default async function ReplayPage({ params, searchParams }: Props) {
   });
   if (!backtest) notFound();
 
-  // Si pas de période sélectionnée, afficher le formulaire de sélection
   if (!from || !to) {
-    const defaultFrom = backtest.periodStart.toISOString().slice(0, 10);
-    const defaultTo = backtest.periodEnd.toISOString().slice(0, 10);
-    return <PeriodSelector backtestId={id} instrument={backtest.instrument} defaultFrom={defaultFrom} defaultTo={defaultTo} />;
+    return (
+      <PeriodSelector
+        backtestId={id}
+        instrument={backtest.instrument}
+        defaultFrom={backtest.periodStart.toISOString().slice(0, 10)}
+        defaultTo={backtest.periodEnd.toISOString().slice(0, 10)}
+      />
+    );
   }
 
-  // Charger les bars depuis la DB
   const fromMs = new Date(from).getTime();
-  const toMs = new Date(to).getTime();
+  const toMs   = new Date(to).getTime();
 
   const rawBars = await prisma.ohlcvBar.findMany({
     where: {
@@ -1200,22 +1396,28 @@ export default async function ReplayPage({ params, searchParams }: Props) {
   });
 
   if (rawBars.length === 0) {
-    return <NoDataScreen backtestId={id} instrument={backtest.instrument} from={from} to={to} timeframe={tf} />;
+    return (
+      <NoDataScreen
+        backtestId={id}
+        instrument={backtest.instrument}
+        from={from}
+        to={to}
+        timeframe={tf}
+      />
+    );
   }
 
   const bars: Bar[] = rawBars.map((b) => ({
-    time: Number(b.timestamp) / 1000,
-    open: b.open,
-    high: b.high,
-    low: b.low,
-    close: b.close,
+    time:   Number(b.timestamp) / 1000,
+    open:   b.open,
+    high:   b.high,
+    low:    b.low,
+    close:  b.close,
     volume: b.volume,
   }));
 
   return <ReplayEngine backtestId={id} instrument={backtest.instrument} initialBars={bars} />;
 }
-
-/* ─── Sub-components ─────────────────────────────────────────────────────── */
 
 function PeriodSelector({ backtestId, instrument, defaultFrom, defaultTo }: {
   backtestId: string; instrument: string; defaultFrom: string; defaultTo: string;
@@ -1230,24 +1432,28 @@ function PeriodSelector({ backtestId, instrument, defaultFrom, defaultTo }: {
         <p className="mb-6 text-sm" style={{ color: "var(--text-muted)" }}>{instrument}</p>
 
         <form method="GET" className="flex flex-col gap-4">
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>From</label>
-            <input type="date" name="from" defaultValue={defaultFrom} className="w-full rounded-xl px-3 py-2 text-sm" style={{ backgroundColor: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-primary)" }} />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>To</label>
-            <input type="date" name="to" defaultValue={defaultTo} className="w-full rounded-xl px-3 py-2 text-sm" style={{ backgroundColor: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-primary)" }} />
-          </div>
+          {[
+            { name: "from", label: "From", defaultValue: defaultFrom },
+            { name: "to",   label: "To",   defaultValue: defaultTo   },
+          ].map(({ name, label, defaultValue }) => (
+            <div key={name}>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>{label}</label>
+              <input type="date" name={name} defaultValue={defaultValue} className="w-full rounded-xl px-3 py-2 text-sm"
+                style={{ backgroundColor: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-primary)" }} />
+            </div>
+          ))}
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>Timeframe</label>
-            <select name="tf" defaultValue="m1" className="w-full rounded-xl px-3 py-2 text-sm" style={{ backgroundColor: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-primary)" }}>
+            <select name="tf" defaultValue="m1" className="w-full rounded-xl px-3 py-2 text-sm"
+              style={{ backgroundColor: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-primary)" }}>
               <option value="m1">M1</option>
               <option value="m5">M5</option>
               <option value="m15">M15</option>
               <option value="h1">H1</option>
             </select>
           </div>
-          <button type="submit" className="mt-2 w-full rounded-xl py-3 text-sm font-bold" style={{ backgroundColor: "#6366f1", color: "#fff" }}>
+          <button type="submit" className="mt-2 w-full rounded-xl py-3 text-sm font-bold"
+            style={{ backgroundColor: "#6366f1", color: "#fff" }}>
             Load Replay
           </button>
         </form>
@@ -1262,13 +1468,10 @@ function NoDataScreen({ backtestId, instrument, from, to, timeframe }: {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4" style={{ backgroundColor: "#0f1117" }}>
       <p className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>No OHLCV data found</p>
-      <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-        {instrument} · {timeframe.toUpperCase()} · {from} → {to}
-      </p>
-      <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-        Download data first from the backtest page.
-      </p>
-      <Link href={`/backtest/${backtestId}`} className="mt-2 rounded-xl px-6 py-2.5 text-sm font-bold" style={{ backgroundColor: "#6366f1", color: "#fff" }}>
+      <p className="text-sm" style={{ color: "var(--text-muted)" }}>{instrument} · {timeframe.toUpperCase()} · {from} → {to}</p>
+      <p className="text-sm" style={{ color: "var(--text-muted)" }}>Download data first from the backtest page.</p>
+      <Link href={`/backtest/${backtestId}`} className="mt-2 rounded-xl px-6 py-2.5 text-sm font-bold"
+        style={{ backgroundColor: "#6366f1", color: "#fff" }}>
         Back to Backtest
       </Link>
     </div>
@@ -1276,210 +1479,57 @@ function NoDataScreen({ backtestId, instrument, from, to, timeframe }: {
 }
 ```
 
-- [ ] **Step 2: Commit**
-
-```bash
-git add src/app/(app)/backtest/[id]/replay/page.tsx
-git commit -m "feat: replay page with period selector, data loading, and NoData screen"
-```
-
 ---
 
-## Task 10 — Bouton Replay Mode + UI de téléchargement sur la page backtest
+## Task 12 — Test end-to-end
 
-**Files:**
-- Modify: `src/app/(app)/backtest/[id]/page.tsx`
-- Create: `src/app/(app)/backtest/[id]/DownloadOhlcvButton.tsx`
-
-**Interfaces:**
-- Consumes: `/api/ohlcv/download` (Task 2), `Backtest.instrument`, `Backtest.periodStart`, `Backtest.periodEnd`
-- Produces: bouton "Replay Mode" → `/backtest/[id]/replay`, bouton "Download Data" qui trigger le téléchargement Dukascopy
-
-- [ ] **Step 1: Créer DownloadOhlcvButton.tsx**
-
-```typescript
-// src/app/(app)/backtest/[id]/DownloadOhlcvButton.tsx
-"use client";
-
-import { useState } from "react";
-import { Download, Check, AlertCircle, Loader2 } from "lucide-react";
-
-type Props = {
-  instrument: string;
-  periodStart: string;  // ISO date string
-  periodEnd: string;    // ISO date string
-};
-
-type State = "idle" | "loading" | "success" | "error";
-
-export function DownloadOhlcvButton({ instrument, periodStart, periodEnd }: Props) {
-  const [state, setState] = useState<State>("idle");
-  const [result, setResult] = useState<{ inserted: number } | null>(null);
-  const [errorMsg, setErrorMsg] = useState("");
-
-  async function handleDownload() {
-    setState("loading");
-    setErrorMsg("");
-    try {
-      const res = await fetch("/api/ohlcv/download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          instrument,
-          from: periodStart.slice(0, 10),
-          to: periodEnd.slice(0, 10),
-          timeframe: "m1",
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error ?? "Download failed");
-      }
-      const data = await res.json();
-      setResult(data);
-      setState("success");
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "Unknown error");
-      setState("error");
-    }
-  }
-
-  return (
-    <div className="flex items-center gap-2">
-      <button
-        onClick={handleDownload}
-        disabled={state === "loading"}
-        className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-semibold transition-all disabled:opacity-50"
-        style={{
-          backgroundColor:
-            state === "success" ? "rgba(34,197,94,0.15)"
-            : state === "error" ? "rgba(239,68,68,0.15)"
-            : "var(--bg-surface)",
-          color:
-            state === "success" ? "#22c55e"
-            : state === "error" ? "#ef4444"
-            : "var(--text-muted)",
-          border: "1px solid var(--border)",
-        }}
-      >
-        {state === "loading" && <Loader2 size={13} className="animate-spin" />}
-        {state === "success" && <Check size={13} />}
-        {state === "error" && <AlertCircle size={13} />}
-        {state === "idle" && <Download size={13} />}
-
-        {state === "idle" && "Download M1 Data"}
-        {state === "loading" && "Downloading…"}
-        {state === "success" && `${result?.inserted.toLocaleString()} bars loaded`}
-        {state === "error" && "Error"}
-      </button>
-      {state === "error" && (
-        <span className="text-xs" style={{ color: "#ef4444" }}>{errorMsg}</span>
-      )}
-    </div>
-  );
-}
-```
-
-- [ ] **Step 2: Modifier page.tsx — ajouter bouton Replay Mode et DownloadOhlcvButton**
-
-Dans `src/app/(app)/backtest/[id]/page.tsx`, dans la section `{/* Actions */}` (ligne ~106), ajouter avant `<DeleteButton>` :
-
-```typescript
-import Link from "next/link";
-import { Play } from "lucide-react";
-import { DownloadOhlcvButton } from "./DownloadOhlcvButton";
-```
-
-Et dans le JSX des actions :
-```tsx
-<DownloadOhlcvButton
-  instrument={backtest.instrument}
-  periodStart={backtest.periodStart.toISOString()}
-  periodEnd={backtest.periodEnd.toISOString()}
-/>
-<Link
-  href={`/backtest/${id}/replay`}
-  className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-bold"
-  style={{ backgroundColor: "#6366f1", color: "#fff" }}
->
-  <Play size={13} /> Replay Mode
-</Link>
-```
-
-- [ ] **Step 3: Vérifier que la page compile**
-
-```bash
-cd /home/gilles/DEV/TRADING/MyJournal
-npx tsc --noEmit
-```
-
-Résultat attendu : 0 erreurs TypeScript.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add src/app/(app)/backtest/[id]/DownloadOhlcvButton.tsx src/app/(app)/backtest/[id]/page.tsx
-git commit -m "feat: add Replay Mode button and Download OHLCV button to backtest detail page"
-```
-
----
-
-## Task 11 — Test end-to-end du flux complet
-
-**Files:**
-- Aucun fichier créé, test manuel du flux
-
-**Interfaces:**
-- Consumes: toutes les tâches précédentes
+**Files:** aucun — test manuel
 
 - [ ] **Step 1: Démarrer l'app**
 
 ```bash
-cd /home/gilles/DEV/TRADING/MyJournal
 npm run dev
 ```
 
-- [ ] **Step 2: Télécharger des données de test**
+- [ ] **Step 2: Vérifier la couverture (DB vide)**
 
-Aller sur `/backtest/<un-id-existant>`, cliquer "Download M1 Data". Vérifier que le bouton passe à `X bars loaded`.
+Aller sur `/backtest/<id>`. Le composant `OhlcvDataManager` doit afficher :
+`"Download X months to enable Replay"` (bouton gris avec le nombre de mois manquants).
 
-Si le bouton reste en "Downloading…" plus de 60s, c'est normal pour une période longue (Dukascopy limite le débit). Vérifier dans les logs serveur qu'il n'y a pas d'erreur.
+- [ ] **Step 3: Télécharger 1 mois**
 
-- [ ] **Step 3: Tester le replay**
+Cliquer le bouton Download. Observer la barre de progression mois par mois.
+Après completion → le bouton "Replay Mode" (violet) doit apparaître.
 
-Cliquer "Replay Mode" → sélectionner une période courte (3-5 jours) → "Load Replay".
+- [ ] **Step 4: Vérifier deduplication**
 
-Vérifier :
-- Le chart s'affiche avec des bougies
-- Les boutons ▶/⏸/◀/▶ fonctionnent
-- L'autoplay avance les bougies au bon rythme (1x ≈ 1 bougie/seconde)
-- Le changement de vitesse (1x/2x/5x/10x) est réactif
+Recharger la page. Le composant doit directement afficher "Replay Mode" sans proposer de Download (les mois sont couverts).
 
-- [ ] **Step 4: Tester un trade complet**
+- [ ] **Step 5: Tester le replay**
 
-1. Pauser le replay
-2. Cliquer "+ Order"
-3. Choisir direction, entrer entry/SL/TP
-4. Confirmer → relancer le play
-5. Vérifier que le modal `TradeResultModal` s'affiche quand SL ou TP est touché
-6. Entrer une note "Test OB H4" → "Save Trade"
-7. Retourner sur `/backtest/<id>` → vérifier que le `BacktestTrade` est apparu dans la liste avec les bonnes valeurs
+Cliquer "Replay Mode" → sélectionner une période → "Load Replay".
+- Chart s'affiche avec 50 bougies initiales
+- ▶ Play avance les bougies à 1/seconde
+- Changer vitesse → immédiat
+- ◀ Reculer → supprime l'ordre pending si actif
 
-- [ ] **Step 5: Commit final**
+- [ ] **Step 6: Tester un trade complet**
 
-```bash
-git add -A
-git commit -m "feat: backtest replay engine — end-to-end validated"
-```
+1. Pause → "+ Order" → LONG → entry/SL/TP → Confirm → Play
+2. Attendre que SL ou TP soit touché → modal `TradeResultModal` s'affiche
+3. Entrer une note → "Save Trade"
+4. Aller sur `/backtest/<id>` → le `BacktestTrade` apparaît dans la liste
 
 ---
 
 ## Notes d'implémentation
 
-**Instruments Dukascopy à vérifier :** `dukascopy-node` supporte `ustech` pour le NQ CFD et `spx500` pour le ES CFD. Les Futures CME (`NQ!`, `ES!`) ne sont peut-être pas disponibles — dans ce cas utiliser les CFD équivalents qui suivent le même prix.
+**BigInt Prisma :** `timestamp` est `BigInt`. Ne jamais passer un `BigInt` à un composant client — toujours convertir avec `Number(b.timestamp)` côté server component avant de sérialiser.
 
-**BigInt Prisma :** le champ `timestamp` est `BigInt` en Prisma. Ne pas oublier de sérialiser avec `Number(b.timestamp)` avant de passer au client (Next.js ne sérialise pas les BigInt nativement).
+**lightweight-charts time :** attend des secondes UTC entières (`timestamp_ms / 1000`), pas des millisecondes.
 
-**lightweight-charts time format :** la lib attend `time` en secondes UTC (Unix timestamp / 1000), pas en millisecondes.
+**Performance à 10x :** `setData()` sur 50k bougies peut laguer. Optimisation future : utiliser `series.update(lastBar)` au lieu de `setData(allBars)` pour n'ajouter que la dernière bougie. Implémentable en exposant `lastBar` depuis `useReplayEngine`.
 
-**Performance replay rapide :** à 10x (10 bougies/sec), `setData` sur 50k bougies peut être lent. Optimisation possible : utiliser `update()` au lieu de `setData()` pour n'ajouter que la dernière bougie. Si besoin, refactoriser `useReplayEngine` pour exposer `lastAddedBar` séparément.
+**Timeout Vercel Free :** chaque appel `/api/ohlcv/download` télécharge 1 mois (~50s max). Le découpage mois par mois depuis le client évite le timeout de 30s de Vercel Free.
+
+**Instruments Dukascopy :** `ustech` = NQ CFD, `spx500` = ES CFD. Les Futures CME réels (`NQ!`, `ES!`) ne sont probablement pas disponibles — les CFD suivent le même prix avec un écart minimal.

@@ -719,6 +719,26 @@ model BacktestTradeMedia {
 }
 
 // =============================================================================
+// MODEL : OhlcvBar — données OHLCV partagées entre tous les backtests
+// =============================================================================
+model OhlcvBar {
+  id         String @id @default(cuid())
+  instrument String  // "EURUSD", "GBPUSD", "XAUUSD", "NQ", "ES"
+  timeframe  String  // "m1", "m5", "m15", "h1"
+  timestamp  BigInt  // Unix ms UTC
+
+  open   Float
+  high   Float
+  low    Float
+  close  Float
+  volume Float @default(0)
+
+  @@unique([instrument, timeframe, timestamp])
+  @@index([instrument, timeframe, timestamp])
+  @@map("ohlcv_bar")
+}
+
+// =============================================================================
 // ENUMS : PlanAdherence / EmotionLevel (used on Trade)
 // =============================================================================
 

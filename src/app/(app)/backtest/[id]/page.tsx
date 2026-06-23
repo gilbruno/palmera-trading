@@ -7,6 +7,7 @@ import { ArrowLeft, CheckCircle, Clock, Minus } from "lucide-react";
 import type { BacktestStatus, Direction, TradeOutcome } from "@/generated/prisma/enums";
 import { AddTradePanel } from "./AddTradePanel";
 import { DeleteButton } from "./DeleteButton";
+import { OhlcvDataManager } from "./OhlcvDataManager";
 import { updateBacktestStatus } from "../actions";
 import { PrimaryButton } from "@/components/ui/PrimaryButton";
 import { BacktestScenarioView } from "./BacktestScenarioView";
@@ -118,6 +119,12 @@ export default async function BacktestDetailPage({
               </PrimaryButton>
             </form>
           )}
+          <OhlcvDataManager
+            backtestId={id}
+            instrument={backtest.instrument}
+            periodStart={backtest.periodStart.toISOString().slice(0, 10)}
+            periodEnd={backtest.periodEnd.toISOString().slice(0, 10)}
+          />
           <DeleteButton backtestId={id} />
         </div>
       </div>
