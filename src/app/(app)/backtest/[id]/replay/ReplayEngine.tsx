@@ -258,7 +258,6 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
           entryDate:  new Date(activationBar.time * 1000),
         });
         setActiveTradeId(id);
-        void captureAndUploadScreenshot(id);
       } catch (err) {
         console.error("Failed to create trade on activation:", err);
       }
@@ -1123,7 +1122,6 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
           entryDate:  new Date(engine.currentBar.time * 1000),
         });
         setActiveTradeId(id);
-        void captureAndUploadScreenshot(id);
       }
 
       engine.placeOrder(order);
@@ -1153,6 +1151,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
         },
         notes
       );
+      void captureAndUploadScreenshot(activeTradeId);
       setActiveTradeId(null);
       if (exitModalTimerRef.current) clearTimeout(exitModalTimerRef.current);
       exitModalTimerRef.current = setTimeout(() => setExitModal(null), 1800);
@@ -1655,7 +1654,6 @@ export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, f
                   entryDate:  new Date(engine.currentBar.time * 1000),
                 });
                 setActiveTradeId(id);
-                void captureAndUploadScreenshot(id);
               } catch (err) {
                 console.error("Failed to create MARKET trade from OrderPanel:", err);
               }
