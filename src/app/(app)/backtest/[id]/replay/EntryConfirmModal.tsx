@@ -59,7 +59,16 @@ export function EntryConfirmModal({ overlayState, entryBar, orderType, onConfirm
               style={{ backgroundColor: "#1f2937" }}
             >
               <span className="text-xs" style={{ color: "#6b7280" }}>{label}</span>
-              <span className="font-mono text-sm font-semibold" style={{ color: "#f9fafb" }}>{value}</span>
+              {label === "Type" ? (
+                <span
+                  className="font-bold rounded px-1.5 py-0.5"
+                  style={{ backgroundColor: "#312e81", color: "#a5b4fc" }}
+                >
+                  {value}
+                </span>
+              ) : (
+                <span className="font-mono text-sm font-semibold" style={{ color: "#f9fafb" }}>{value}</span>
+              )}
             </div>
           ))}
         </div>
