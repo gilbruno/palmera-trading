@@ -200,6 +200,15 @@ export function useReplayEngine(
   const cancelPendingOrder = useCallback(() => setPendingOrder(null), []);
   const cancelActiveOrder = useCallback(() => setActiveOrder(null), []);
 
+  const updateActiveOrderLevels = useCallback((sl: number, tp: number) => {
+    setActiveOrder((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, stopLoss: sl, takeProfit: tp };
+      activeOrderRef.current = updated;
+      return updated;
+    });
+  }, []);
+
   useEffect(() => {
     if (!isPlaying) {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -229,5 +238,6 @@ export function useReplayEngine(
     activateOrder,
     cancelPendingOrder,
     cancelActiveOrder,
+    updateActiveOrderLevels,
   };
 }
