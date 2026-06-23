@@ -51,6 +51,13 @@ export function useReplayEngine(
   const visibleBars = bars.slice(0, currentIndex + 1);
   const currentBar = bars[currentIndex] ?? null;
 
+  // Reset position when bars array changes (TF switch)
+  useEffect(() => {
+    setCurrentIndex(MIN_START_INDEX);
+    setIsPlaying(false);
+    setPendingOrder(null);
+  }, [bars]);
+
   const checkOrderFill = useCallback(
     (bar: Bar) => {
       const order = pendingOrderRef.current;

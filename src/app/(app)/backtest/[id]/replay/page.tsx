@@ -50,11 +50,6 @@ export default async function ReplayPage({ params, searchParams }: Props) {
     redirect(`/backtest/${id}/replay`);
   }
 
-  // Always read M1 from DB — aggregate to requested TF in memory
-  const TF_MINUTES: Record<string, number> = {
-    m1: 1, m5: 5, m15: 15, m30: 30, h1: 60, h4: 240, d1: 1440,
-  };
-
   // Extend toMs to end of day to include all bars on the to-date
   const toMsEndOfDay = toMs + 24 * 60 * 60 * 1000 - 1;
 
@@ -82,30 +77,40 @@ export default async function ReplayPage({ params, searchParams }: Props) {
     );
   }
 
+  // Aggregate M1 → requested TF server-side for initial load (small payload to client)
+  const TF_MINUTES: Record<string, number> = {
+    m1: 1, m5: 5, m15: 15, m30: 30, h1: 60, h4: 240, d1: 1440,
+  };
   const tfMinutes = TF_MINUTES[tf] ?? 1;
-  const periodMs = tfMinutes * 60 * 1000;
-
-  // Aggregate M1 → requested timeframe
-  const buckets = new Map<number, { open: number; high: number; low: number; close: number; volume: number }>();
+  const periodMs  = tfMinutes * 60 * 1000;
+  const buckets   = new Map<number, { open: number; high: number; low: number; close: number; volume: number }>();
   for (const b of m1Bars) {
-    const barMs = Number(b.timestamp);
+    const barMs    = Number(b.timestamp);
     const bucketMs = Math.floor(barMs / periodMs) * periodMs;
-    const ex = buckets.get(bucketMs);
+    const ex       = buckets.get(bucketMs);
     if (!ex) {
       buckets.set(bucketMs, { open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume });
     } else {
-      ex.high = Math.max(ex.high, b.high);
-      ex.low  = Math.min(ex.low,  b.low);
-      ex.close = b.close;
-      ex.volume += b.volume;
+      ex.high = Math.max(ex.high, b.high); ex.low = Math.min(ex.low, b.low);
+      ex.close = b.close; ex.volume += b.volume;
     }
   }
-
   const bars: Bar[] = Array.from(buckets.entries())
     .sort(([a], [b]) => a - b)
-    .map(([bucketMs, b]) => ({ time: bucketMs / 1000, ...b }));
+    .map(([ms, b]) => ({ time: ms / 1000, ...b }));
 
-  return <ReplayEngine backtestId={id} instrument={backtest.instrument} initialBars={bars} tf={tf} />;
+  return (
+    <ReplayEngine
+      backtestId={id}
+      instrument={backtest.instrument}
+      initialBars={bars}
+      initialTf={tf}
+      from={from}
+      to={to}
+      fromMs={fromMs}
+      toMs={toMsEndOfDay}
+    />
+  );
 }
 
 function PeriodSelector({ backtestId, instrument, defaultFrom, defaultTo }: {

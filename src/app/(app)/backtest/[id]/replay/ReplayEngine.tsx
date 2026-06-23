@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   createChart,
+  createTextWatermark,
   CandlestickSeries,
   LineSeries,
   type IChartApi,
@@ -17,8 +18,10 @@ import {
   type PaneAttachedParameter,
   type IPriceLine,
   type LineData,
+  type MouseEventParams,
   ColorType,
   LineStyle,
+  TickMarkType,
 } from "lightweight-charts";
 import { useReplayEngine, type Bar, type FilledTrade } from "./useReplayEngine";
 import { getSessionBands, calcIBRange, calcVwap, type SessionBand } from "./indicators";
@@ -28,7 +31,7 @@ import { TradeResultModal } from "./TradeResultModal";
 import { createReplayTrade } from "./actions";
 import Link from "next/link";
 import { ArrowLeft, Maximize2, Minimize2, TrendingUp, TrendingDown, X } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 // ---------------------------------------------------------------------------
 // ICT Sessions overlay — IPanePrimitive implementation (lightweight-charts v5)
@@ -101,15 +104,49 @@ class SessionsPrimitive implements IPanePrimitiveBase<PaneAttachedParameter<Time
 }
 
 // ---------------------------------------------------------------------------
+const TF_BAR_SPACING: Record<string, number> = { m1: 2, m5: 3, m15: 4, h1: 6, h4: 10 };
+
+function tfTickMarkFormatter(time: Time, tickMarkType: TickMarkType, locale: string): string {
+  const ts = typeof time === "number" ? time * 1000 : Date.parse(time as string);
+  const d = new Date(ts);
+  const hhmm = () => d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const mmdd = () => d.toLocaleDateString(locale, { month: "short", day: "numeric" });
+  if (tickMarkType === TickMarkType.Year)       return String(d.getUTCFullYear());
+  if (tickMarkType === TickMarkType.Month)      return d.toLocaleDateString(locale, { month: "short" });
+  if (tickMarkType === TickMarkType.DayOfMonth) return mmdd();
+  return hhmm();
+}
+
+// Used at chart init and after a TF data load (resets zoom for new TF then fits content).
+function tfTimeScaleOptions(tf: string) {
+  return { tickMarkFormatter: tfTickMarkFormatter, barSpacing: TF_BAR_SPACING[tf] ?? 6, minBarSpacing: 1 };
+}
+
+// Used in the [tf] effect — updates formatter without resetting user zoom.
+function tfFormatterOptions() {
+  return { tickMarkFormatter: tfTickMarkFormatter, minBarSpacing: 1 };
+}
+
+// ---------------------------------------------------------------------------
 
 type Props = {
   backtestId: string;
   instrument: string;
   initialBars: Bar[];
-  tf: string;
+  initialTf: string;
+  from: string;
+  to: string;
+  fromMs: number;
+  toMs: number;
 };
 
-export function ReplayEngine({ backtestId, instrument, initialBars, tf }: Props) {
+export function ReplayEngine({ backtestId, instrument, initialBars, initialTf, from, to, fromMs, toMs }: Props) {
+  const [tf, setTf] = useState(initialTf);
+  const [bars, setBars] = useState<Bar[]>(initialBars);
+  const [isLoadingTf, setIsLoadingTf] = useState(false);
+  const [loadingTfTarget, setLoadingTfTarget] = useState<string>("");
+  const abortFetchRef = useRef<AbortController | null>(null);
+  const fitOnNextRenderRef = useRef(false);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const overlayDivRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -131,6 +168,15 @@ export function ReplayEngine({ backtestId, instrument, initialBars, tf }: Props)
   const orderOverlayRef = useRef<OrderOverlay | null>(null);
   const [overlayState, setOverlayState] = useState<OrderOverlayState | null>(null);
   const overlayStateRef = useRef<OrderOverlayState | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const watermarkRef = useRef<any>(null);
+
+  // Crosshair OHLC hover display
+  type HoverOhlc = { time: number; open: number; high: number; low: number; close: number } | null;
+  const [hoverOhlc, setHoverOhlc] = useState<HoverOhlc>(null);
+  const hoverOhlcRef = useRef<HoverOhlc>(null);
+  // Guard: suppress crosshair events fired by setData() calls to avoid infinite loops
+  const isSettingDataRef = useRef(false);
 
   // Active tool: null = default (pan/zoom), "LONG"/"SHORT" = place order on next click, "VWAP" = anchor VWAP on next click
   type ActiveTool = "LONG" | "SHORT" | "VWAP" | null;
@@ -146,24 +192,44 @@ export function ReplayEngine({ backtestId, instrument, initialBars, tf }: Props)
     setPendingTrade(trade);
   }, []);
 
-  // Wrap initialBars in useMemo to avoid stale closure issues in useReplayEngine
-  const bars = useMemo(() => initialBars, [initialBars]);
-
   // Keep barsRef in sync for use inside the click closure
   useEffect(() => { barsRef.current = bars; }, [bars]);
 
   const engine = useReplayEngine(bars, { onTradeFilled: handleTradeFilled });
 
   const router = useRouter();
-  const searchParams = useSearchParams();
 
-  function switchTf(newTf: string) {
-    const from = searchParams.get("from") ?? "";
-    const to   = searchParams.get("to")   ?? "";
+  async function switchTf(newTf: string) {
+    if (newTf === tf) return;
+    abortFetchRef.current?.abort();
+    const controller = new AbortController();
+    abortFetchRef.current = controller;
+    setIsLoadingTf(true);
+    setLoadingTfTarget(newTf);
     vwapAnchorIndexRef.current = null;
     setVwapAnchorIndex(null);
     vwapSeriesRef.current?.setData([]);
-    router.push(`/backtest/${backtestId}/replay?from=${from}&to=${to}&tf=${newTf}`);
+    orderOverlayRef.current?.clear();
+    overlayStateRef.current = null;
+    setOverlayState(null);
+    try {
+      const url = `/api/ohlcv?instrument=${encodeURIComponent(instrument)}&timeframe=${newTf}&from=${fromMs}&to=${toMs}`;
+      const res = await fetch(url, { signal: controller.signal });
+      if (res.ok) {
+        const json = await res.json();
+        const data: Bar[] = Array.isArray(json) ? json : [];
+        if (data.length === 0) return;
+        setBars(data);
+        setTf(newTf);
+        chartRef.current?.applyOptions({ timeScale: tfTimeScaleOptions(newTf) });
+        fitOnNextRenderRef.current = true;
+        router.replace(`/backtest/${backtestId}/replay?from=${from}&to=${to}&tf=${newTf}`, { scroll: false });
+      }
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+    } finally {
+      setIsLoadingTf(false);
+    }
   }
 
   // Init chart
@@ -186,8 +252,26 @@ export function ReplayEngine({ backtestId, instrument, initialBars, tf }: Props)
         borderColor: "#1f2937",
         timeVisible: true,
         secondsVisible: false,
+        shiftVisibleRangeOnNewBar: false,
+        ...tfTimeScaleOptions(initialTf),
       },
     });
+
+    // Watermark — instrument + timeframe, centered top
+    const wm = createTextWatermark(chart.panes()[0], {
+      horzAlign: "center",
+      vertAlign: "top",
+      lines: [
+        {
+          text: `${instrument} · ${tf.toUpperCase()}`,
+          color: "rgba(255, 255, 255, 0.12)",
+          fontSize: 28,
+          fontStyle: "bold",
+          fontFamily: "ui-sans-serif, system-ui, sans-serif",
+        },
+      ],
+    });
+    watermarkRef.current = wm;
 
     const series = chart.addSeries(CandlestickSeries, {
       upColor: "#22c55e",
@@ -255,6 +339,33 @@ export function ReplayEngine({ backtestId, instrument, initialBars, tf }: Props)
       }
     });
 
+    // Crosshair OHLC subscription
+    const onCrosshairMove = (param: MouseEventParams<Time>) => {
+      if (isSettingDataRef.current) return;
+      if (!param.time || !param.point || !seriesRef.current) {
+        if (hoverOhlcRef.current !== null) {
+          hoverOhlcRef.current = null;
+          setHoverOhlc(null);
+        }
+        return;
+      }
+      const data = param.seriesData.get(seriesRef.current) as CandlestickData | undefined;
+      if (!data) {
+        if (hoverOhlcRef.current !== null) {
+          hoverOhlcRef.current = null;
+          setHoverOhlc(null);
+        }
+        return;
+      }
+      const t = param.time as number;
+      const prev = hoverOhlcRef.current;
+      if (prev && prev.time === t && prev.open === data.open && prev.close === data.close) return;
+      const next = { time: t, open: data.open, high: data.high, low: data.low, close: data.close };
+      hoverOhlcRef.current = next;
+      setHoverOhlc(next);
+    };
+    chart.subscribeCrosshairMove(onCrosshairMove);
+
     const sessionsPrimitive = new SessionsPrimitive();
     chart.panes()[0].attachPrimitive(sessionsPrimitive);
     sessionsPrimitiveRef.current = sessionsPrimitive;
@@ -286,7 +397,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, tf }: Props)
       const handle = ov.hitTestHandle(x, y);
       if (handle) {
         ov.setHovered(handle);
-        document.body.style.cursor = "ns-resize";
+        document.body.style.cursor = handle === "resize" ? "ew-resize" : "ns-resize";
       } else if (ov.hitTestBody(x, y)) {
         ov.setHovered("move");
         document.body.style.cursor = "grab";
@@ -310,7 +421,12 @@ export function ReplayEngine({ backtestId, instrument, initialBars, tf }: Props)
         e.preventDefault();
         chartEl.setPointerCapture(e.pointerId);
         ov.setDragging(hit);
-        document.body.style.cursor = "ns-resize";
+        if (hit === "resize") {
+          ov.startResize(x);
+          document.body.style.cursor = "ew-resize";
+        } else {
+          document.body.style.cursor = "ns-resize";
+        }
         return;
       }
 
@@ -341,6 +457,7 @@ export function ReplayEngine({ backtestId, instrument, initialBars, tf }: Props)
       const price = seriesRef.current?.coordinateToPrice(y);
       if (price == null) return;
       if (drag === "move") ov.applyMove(x, price);
+      else if (drag === "resize") ov.applyResize(x);
       else ov.applyDrag(price);
     };
 
@@ -384,9 +501,31 @@ export function ReplayEngine({ backtestId, instrument, initialBars, tf }: Props)
       chartEl.removeEventListener("pointerup",     onCapturePointerUp,    { capture: true });
       chartEl.removeEventListener("pointercancel", onCapturePointerUp,    { capture: true });
       document.body.style.cursor = "";
+      chart.unsubscribeCrosshairMove(onCrosshairMove);
       chart.remove();
     };
   }, []);
+
+  // Update watermark text when instrument or tf changes
+  useEffect(() => {
+    const wm = watermarkRef.current;
+    if (!wm?.applyOptions) return;
+    wm.applyOptions({
+      lines: [{
+        text: `${instrument} · ${tf.toUpperCase()}`,
+        color: "rgba(255, 255, 255, 0.12)",
+        fontSize: 28,
+        fontStyle: "bold",
+        fontFamily: "ui-sans-serif, system-ui, sans-serif",
+      }],
+    });
+  }, [instrument, tf]);
+
+  // Update formatter only — barSpacing reset happens in switchTf to preserve user zoom
+  useEffect(() => {
+    if (!chartRef.current) return;
+    chartRef.current.applyOptions({ timeScale: tfFormatterOptions() });
+  }, [tf]);
 
   // Update chart on every visibleBars change
   useEffect(() => {
@@ -398,7 +537,13 @@ export function ReplayEngine({ backtestId, instrument, initialBars, tf }: Props)
       low: b.low,
       close: b.close,
     }));
+    isSettingDataRef.current = true;
     seriesRef.current.setData(data);
+    isSettingDataRef.current = false;
+    if (fitOnNextRenderRef.current) {
+      fitOnNextRenderRef.current = false;
+      chartRef.current?.timeScale().fitContent();
+    }
     if (sessionsPrimitiveRef.current) {
       const bands = getSessionBands(engine.visibleBars);
       sessionsPrimitiveRef.current.update(bands);
@@ -681,6 +826,73 @@ export function ReplayEngine({ backtestId, instrument, initialBars, tf }: Props)
           ref={overlayDivRef}
           className="absolute inset-0"
         />
+
+        {/* TF loader overlay */}
+        {isLoadingTf && (
+          <div
+            className="absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-none select-none"
+            style={{ backgroundColor: "rgba(15,17,23,0.80)", backdropFilter: "blur(3px)" }}
+          >
+            <div className="flex flex-col items-center gap-4">
+              {/* Ring spinner */}
+              <div className="relative h-10 w-10">
+                <div
+                  className="absolute inset-0 rounded-full border-2"
+                  style={{ borderColor: "rgba(99,102,241,0.18)" }}
+                />
+                <div
+                  className="absolute inset-0 animate-spin rounded-full border-2 border-transparent"
+                  style={{ borderTopColor: "#6366f1" }}
+                />
+              </div>
+              {/* Label */}
+              <div className="flex flex-col items-center gap-1">
+                <span
+                  className="text-[11px] font-medium uppercase tracking-[0.2em]"
+                  style={{ color: "#6b7280" }}
+                >
+                  Loading
+                </span>
+                <span
+                  className="text-sm font-bold uppercase tracking-widest"
+                  style={{ color: "#a5b4fc" }}
+                >
+                  {loadingTfTarget.toUpperCase()}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* OHLC crosshair display — TradingView-style top-left of chart pane */}
+        {hoverOhlc && (
+          <div
+            className="absolute left-2 top-2 flex items-center gap-3 rounded-md px-3 py-1.5 pointer-events-none select-none"
+            style={{
+              backgroundColor: "rgba(15,17,23,0.88)",
+              border: "1px solid #1f2937",
+              backdropFilter: "blur(4px)",
+              fontSize: "11px",
+              fontFamily: "ui-monospace, SFMono-Regular, monospace",
+              lineHeight: 1,
+              zIndex: 10,
+            }}
+          >
+            <span style={{ color: "#6b7280" }}>
+              {new Date(hoverOhlc.time * 1000).toUTCString().slice(0, 22)}
+            </span>
+            <span style={{ color: "#6b7280" }}>O</span>
+            <span style={{ color: "#d1d5db" }}>{hoverOhlc.open.toFixed(5)}</span>
+            <span style={{ color: "#4ade80" }}>H</span>
+            <span style={{ color: "#4ade80" }}>{hoverOhlc.high.toFixed(5)}</span>
+            <span style={{ color: "#f87171" }}>L</span>
+            <span style={{ color: "#f87171" }}>{hoverOhlc.low.toFixed(5)}</span>
+            <span style={{ color: "#6b7280" }}>C</span>
+            <span style={{ color: hoverOhlc.close >= hoverOhlc.open ? "#4ade80" : "#f87171" }}>
+              {hoverOhlc.close.toFixed(5)}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Order panel */}

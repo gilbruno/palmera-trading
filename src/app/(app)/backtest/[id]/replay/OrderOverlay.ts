@@ -20,8 +20,8 @@ export type OrderOverlayState = {
   tp: number;
 };
 
-// "move" = drag the whole component; others = drag one level
-export type DragTarget = "entry" | "sl" | "tp" | "move" | null;
+// "move" = drag the whole component; "resize" = drag right edge to change width; others = drag one level
+export type DragTarget = "entry" | "sl" | "tp" | "move" | "resize" | null;
 
 type CanvasTarget2D = {
   useMediaCoordinateSpace<T>(
@@ -29,7 +29,7 @@ type CanvasTarget2D = {
   ): T;
 };
 
-const RECT_WIDTH  = 420;
+const RECT_WIDTH_DEFAULT = 420;
 const HANDLE_HALF = 7;
 const LABEL_H     = 20;
 const FONT        = "bold 11px -apple-system,sans-serif";
@@ -45,6 +45,7 @@ class OrderRenderer implements IPrimitivePaneRenderer {
     private _hov: DragTarget,
     private _anchorTime: Time,           // X anchor — follows chart scroll/zoom
     private _chart: IChartApiBase<Time>,
+    private _rectWidth: number,
   ) {}
 
   draw(target: unknown): void {
@@ -56,25 +57,23 @@ class OrderRenderer implements IPrimitivePaneRenderer {
       const yT = this._series.priceToCoordinate(tp);
       if (yE === null || yS === null || yT === null) return;
 
-      const isLong = direction === "LONG";
-
       // X from anchorTime: timeToCoordinate → CSS px → scale to physical px via dpr
       const dpr = typeof window !== "undefined" ? (window.devicePixelRatio || 1) : 1;
       const anchorCss = this._chart.timeScale().timeToCoordinate(this._anchorTime);
       if (anchorCss === null) return;
-      const x1 = Math.max(0, Math.min(anchorCss * dpr, mediaSize.width - RECT_WIDTH * dpr));
-      const rectW = RECT_WIDTH * dpr;
+      const x1 = Math.max(0, Math.min(anchorCss * dpr, mediaSize.width - this._rectWidth * dpr));
+      const rectW = this._rectWidth * dpr;
       const x2 = x1 + rectW;
 
-      // SL zone
-      const slFill = isLong ? "rgba(239,68,68,0.20)" : "rgba(34,197,94,0.20)";
-      const slLine = isLong ? "#ef4444" : "#22c55e";
+      // SL zone — always red, TP zone always green
+      const slFill = "rgba(239,68,68,0.20)";
+      const slLine = "#ef4444";
       ctx.fillStyle = slFill;
       ctx.fillRect(x1, Math.min(yE, yS), rectW, Math.abs(yE - yS));
 
       // TP zone
-      const tpFill = isLong ? "rgba(34,197,94,0.20)" : "rgba(239,68,68,0.20)";
-      const tpLine = isLong ? "#22c55e" : "#ef4444";
+      const tpFill = "rgba(34,197,94,0.20)";
+      const tpLine = "#22c55e";
       ctx.fillStyle = tpFill;
       ctx.fillRect(x1, Math.min(yE, yT), rectW, Math.abs(yE - yT));
 
@@ -135,6 +134,21 @@ class OrderRenderer implements IPrimitivePaneRenderer {
         ctx.strokeRect(hx, hy, HANDLE_HALF * 2, HANDLE_HALF * 2);
         ctx.restore();
       }
+
+      // Resize handle — right edge, vertically centered between SL and TP
+      const yTop = Math.min(yS, yT);
+      const yBot = Math.max(yS, yT);
+      const yMid = (yTop + yBot) / 2;
+      const hov = this._hov === "resize";
+      const rhx = x2 - HANDLE_HALF;
+      const rhy = yMid - HANDLE_HALF;
+      ctx.save();
+      ctx.fillStyle = hov ? HANDLE_HOV : HANDLE_COL;
+      ctx.fillRect(rhx, rhy, HANDLE_HALF * 2, HANDLE_HALF * 2);
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(rhx, rhy, HANDLE_HALF * 2, HANDLE_HALF * 2);
+      ctx.restore();
     });
   }
 }
@@ -160,14 +174,15 @@ class OrderPaneView implements IPrimitivePaneView {
   private _hov: DragTarget = null;
   private _anchorTime: Time = 0 as Time;
   private _chart: IChartApiBase<Time> | null = null;
+  private _rectWidth = RECT_WIDTH_DEFAULT;
 
-  update(s: OrderOverlayState | null, series: ISeriesApi<SeriesType, Time> | null, hov: DragTarget, anchorTime: Time, chart: IChartApiBase<Time> | null) {
-    this._state = s; this._series = series; this._hov = hov; this._anchorTime = anchorTime; this._chart = chart;
+  update(s: OrderOverlayState | null, series: ISeriesApi<SeriesType, Time> | null, hov: DragTarget, anchorTime: Time, chart: IChartApiBase<Time> | null, rectWidth: number) {
+    this._state = s; this._series = series; this._hov = hov; this._anchorTime = anchorTime; this._chart = chart; this._rectWidth = rectWidth;
   }
 
   renderer(): IPrimitivePaneRenderer | null {
     if (!this._state || !this._series || !this._chart) return null;
-    return new OrderRenderer(this._state, this._series, this._hov, this._anchorTime, this._chart);
+    return new OrderRenderer(this._state, this._series, this._hov, this._anchorTime, this._chart, this._rectWidth);
   }
 }
 
@@ -186,6 +201,9 @@ export class OrderOverlay implements ISeriesPrimitiveBase<SeriesAttachedParamete
   private _moveStartAnchorTime: Time = 0 as Time;
   private _moveStartPrice = 0;
   private _moveStartState: OrderOverlayState | null = null;
+  private _rectWidth = RECT_WIDTH_DEFAULT;
+  private _resizeStartX = 0;
+  private _resizeStartWidth = RECT_WIDTH_DEFAULT;
 
   onChange: ((s: OrderOverlayState) => void) | null = null;
 
@@ -256,20 +274,49 @@ export class OrderOverlay implements ISeriesPrimitiveBase<SeriesAttachedParamete
   hitTestHandle(x: number, y: number): DragTarget {
     if (!this._state || !this._param) return null;
     const ox = this._getOffsetX();
-    const inX = x >= ox - HANDLE_HALF - 4 && x <= ox + HANDLE_HALF + 4;
-    if (!inX) return null;
     const series = this._param.series;
-    for (const key of ["entry", "sl", "tp"] as const) {
-      const coord = series.priceToCoordinate(this._state[key]);
-      if (coord !== null && Math.abs(coord - y) <= HANDLE_HALF + 4) return key;
+
+    // Left-side handles (SL/TP/Entry height adjustment)
+    const inLeftX = x >= ox - HANDLE_HALF - 4 && x <= ox + HANDLE_HALF + 4;
+    if (inLeftX) {
+      for (const key of ["entry", "sl", "tp"] as const) {
+        const coord = series.priceToCoordinate(this._state[key]);
+        if (coord !== null && Math.abs(coord - y) <= HANDLE_HALF + 4) return key;
+      }
     }
+
+    // Right-side resize handle (width adjustment)
+    const rx = ox + this._rectWidth;
+    const inRightX = x >= rx - HANDLE_HALF - 4 && x <= rx + HANDLE_HALF + 4;
+    if (inRightX) {
+      const yS = series.priceToCoordinate(this._state.sl);
+      const yT = series.priceToCoordinate(this._state.tp);
+      if (yS !== null && yT !== null) {
+        const yMid = (yS + yT) / 2;
+        if (Math.abs(y - yMid) <= HANDLE_HALF + 4) return "resize";
+      }
+    }
+
     return null;
   }
+
+  startResize(startX: number) {
+    this._resizeStartX = startX;
+    this._resizeStartWidth = this._rectWidth;
+  }
+
+  applyResize(currentX: number) {
+    const delta = currentX - this._resizeStartX;
+    this._rectWidth = Math.max(100, this._resizeStartWidth + delta);
+    this._refresh();
+  }
+
+  getRectWidth(): number { return this._rectWidth; }
 
   hitTestBody(x: number, y: number): boolean {
     if (!this._state || !this._param) return false;
     const ox = this._getOffsetX();
-    if (x < ox + HANDLE_HALF + 6 || x > ox + RECT_WIDTH) return false;
+    if (x < ox + HANDLE_HALF + 6 || x > ox + this._rectWidth) return false;
     const series = this._param.series;
     const yS = series.priceToCoordinate(this._state.sl);
     const yT = series.priceToCoordinate(this._state.tp);
@@ -280,6 +327,7 @@ export class OrderOverlay implements ISeriesPrimitiveBase<SeriesAttachedParamete
   clear() {
     this._state = null; this._hov = null; this._drag = null;
     this._anchorTime = 0 as Time;
+    this._rectWidth = RECT_WIDTH_DEFAULT;
     this._refresh();
   }
 
@@ -287,7 +335,7 @@ export class OrderOverlay implements ISeriesPrimitiveBase<SeriesAttachedParamete
   paneViews(): readonly IPrimitivePaneView[] { return [this._view]; }
 
   private _refresh() {
-    this._view.update(this._state, this._param?.series ?? null, this._hov, this._anchorTime, this._chart);
+    this._view.update(this._state, this._param?.series ?? null, this._hov, this._anchorTime, this._chart, this._rectWidth);
     this._param?.requestUpdate();
   }
 }
