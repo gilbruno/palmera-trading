@@ -311,9 +311,13 @@ interface AddTradeFormProps {
   periodStart: string;
   /** "YYYY-MM-DD" */
   periodEnd: string;
+  /** "YYYY-MM-DDTHH:mm" — prefill entry date (e.g. last saved trade's) */
+  initialEntryDate?: string;
+  /** Called after the trade is persisted, with the entry date that was used */
+  onSaved?: (entryDate: string) => void;
 }
 
-export function AddTradeForm({ backtestId, instrument, periodStart, periodEnd }: AddTradeFormProps) {
+export function AddTradeForm({ backtestId, instrument, periodStart, periodEnd, initialEntryDate, onSaved }: AddTradeFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, startTransition] = useTransition();
   const [direction, setDirection] = useState<"LONG" | "SHORT">("LONG");
@@ -329,11 +333,9 @@ export function AddTradeForm({ backtestId, instrument, periodStart, periodEnd }:
   const setSel = (key: string) => (v: string) => setSelects((prev) => ({ ...prev, [key]: v }));
   const [error, setError] = useState<string | null>(null);
 
-  const [entryDate, setEntryDate] = useState(() => defaultEntryDate(periodStart, periodEnd));
+  const [entryDate, setEntryDate] = useState(() => initialEntryDate ?? defaultEntryDate(periodStart, periodEnd));
   const [exitDate, setExitDate] = useState("");
   const [exitDateTouched, setExitDateTouched] = useState(false);
-  // savedTradeId is set after the trade row is persisted; used by MediaUpload.
-  const [savedTradeId, setSavedTradeId] = useState<string | null>(null);
   // tempMedia holds uploads done before the trade exists (tradeId="temp")
   const [tempMedia, setTempMedia] = useState<UploadedMedia[]>([]);
   const handleTempUploaded = useCallback((media: UploadedMedia[]) => setTempMedia(media), []);
@@ -372,20 +374,9 @@ export function AddTradeForm({ backtestId, instrument, periodStart, periodEnd }:
     startTransition(async () => {
       try {
         const storageKeys = tempMedia.map((m) => m.storageKey).filter(Boolean) as string[];
-        const tradeId = await addBacktestTrade(backtestId, fd, storageKeys);
-        // Reveal the MediaUpload component bound to the real trade ID.
-        setSavedTradeId(tradeId);
-        setTempMedia([]);
-        formRef.current?.reset();
-        setDirection("LONG");
-        setOutcome("WIN");
-        setFollowedRules("");
-        setOutcome1R("");
-        setOutcome15R("");
-        setSelects({ marketSession: "", timeframeEntry: "", timeframeTrend: "", liquiditySwept: "", biasHTF: "", biasMTF: "", marketStructure: "", ictModel: "", poi: "" });
-        // Keep entryDate as-is: backtests are logged chronologically, so the next trade starts from the last one.
-        setExitDate("");
-        setExitDateTouched(false);
+        await addBacktestTrade(backtestId, fd, storageKeys);
+        // The parent panel collapses and remounts the form, which clears all fields.
+        onSaved?.(entryDate);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to add trade.");
       }
@@ -630,15 +621,11 @@ export function AddTradeForm({ backtestId, instrument, periodStart, periodEnd }:
         </div>
         <div>
           <p className={lCls} style={lStyle}>Screenshots<Tip field="screenshotUrl" /></p>
-          {savedTradeId ? (
-            <MediaUpload tradeId={savedTradeId} />
-          ) : (
-            <MediaUpload
-              tradeId="temp"
-              initialMedia={tempMedia}
-              onTempUploaded={handleTempUploaded}
-            />
-          )}
+          <MediaUpload
+            tradeId="temp"
+            initialMedia={tempMedia}
+            onTempUploaded={handleTempUploaded}
+          />
         </div>
       </Section>
 
@@ -648,23 +635,12 @@ export function AddTradeForm({ backtestId, instrument, periodStart, periodEnd }:
         </p>
       )}
 
-      {savedTradeId ? (
-        <button
-          type="button"
-          onClick={() => { setSavedTradeId(null); setTempMedia([]); }}
-          className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-base font-semibold transition-all hover:opacity-90"
-          style={{ backgroundColor: "rgba(0,200,150,0.15)", border: "1px solid rgba(0,200,150,0.3)", color: "var(--accent-tertiary-light)" }}
-        >
-          ✓ Trade saved — Add another
-        </button>
-      ) : (
-        <button type="submit" disabled={isPending}
-          className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-base font-semibold transition-all hover:opacity-90 disabled:opacity-50"
-          style={{ backgroundColor: "var(--accent-primary)", color: "#1a1710" }}
-        >
-          {isPending ? <Loader2 size={14} className="animate-spin" /> : <span>Add Trade</span>}
-        </button>
-      )}
+      <button type="submit" disabled={isPending}
+        className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-base font-semibold transition-all hover:opacity-90 disabled:opacity-50"
+        style={{ backgroundColor: "var(--accent-primary)", color: "#1a1710" }}
+      >
+        {isPending ? <Loader2 size={14} className="animate-spin" /> : <span>Add Trade</span>}
+      </button>
     </form>
   );
 }
