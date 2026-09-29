@@ -58,6 +58,12 @@ export default async function BacktestDetailPage({
   const periodFmt = (d: Date) =>
     d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
+  // Latest exit (or entry, if still open) across trades — floor for the next trade's entry date.
+  const lastTradeEnd = backtest.trades.reduce<Date | null>((max, t) => {
+    const end = t.exitDate ?? t.entryDate;
+    return !max || end > max ? end : max;
+  }, null);
+
   const completeAction = updateBacktestStatus.bind(null, id, "COMPLETED");
   const reopenAction = updateBacktestStatus.bind(null, id, "IN_PROGRESS");
 
@@ -149,6 +155,7 @@ export default async function BacktestDetailPage({
         instrument={backtest.instrument}
         periodStart={backtest.periodStart.toISOString().slice(0, 10)}
         periodEnd={backtest.periodEnd.toISOString().slice(0, 10)}
+        lastTradeEnd={lastTradeEnd?.toISOString()}
       />
 
       {/* ── Notes ── */}

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { Plus, ChevronDown } from "lucide-react";
 import { AddTradeForm } from "./AddTradeForm";
-import { SuccessToast } from "@/components/ui/SuccessToast";
+import gsap from "gsap";
+import { SuccessModal } from "@/components/ui/SuccessModal";
 
 interface AddTradePanelProps {
   backtestId: string;
@@ -12,25 +13,43 @@ interface AddTradePanelProps {
   periodStart: string;
   /** "YYYY-MM-DD" */
   periodEnd: string;
+  /** ISO — latest exit date among existing trades */
+  lastTradeEnd?: string;
 }
 
 /** Duration of the collapse transition, in ms */
 const COLLAPSE_MS = 350;
 
-export function AddTradePanel({ backtestId, instrument, periodStart, periodEnd }: AddTradePanelProps) {
+export function AddTradePanel({ backtestId, instrument, periodStart, periodEnd, lastTradeEnd }: AddTradePanelProps) {
   const [open, setOpen] = useState(false);
   // Bumped after each save to remount the form with empty fields.
   const [formKey, setFormKey] = useState(0);
   // Backtests are logged chronologically: the next trade starts from the last one's entry date.
   const [lastEntryDate, setLastEntryDate] = useState<string | undefined>(undefined);
-  const [toastOpen, setToastOpen] = useState(false);
+  const [savedTradeId, setSavedTradeId] = useState<string | null>(null);
 
-  function handleSaved(entryDate: string) {
+  // Step 1 — trade persisted: show the success modal.
+  function handleSaved(tradeId: string, entryDate: string) {
     setLastEntryDate(entryDate);
-    setToastOpen(true);
+    setSavedTradeId(tradeId);
+  }
+
+  // Step 2 — modal faded out: collapse the form.
+  // Step 3 — collapse finished: reset the form and scroll to the saved trade.
+  function handleModalClosed() {
+    const tradeId = savedTradeId;
+    setSavedTradeId(null);
     setOpen(false);
-    // Reset the form once the collapse animation has finished.
-    setTimeout(() => setFormKey((k) => k + 1), COLLAPSE_MS);
+    setTimeout(() => {
+      setFormKey((k) => k + 1);
+      const row = tradeId ? document.querySelector<HTMLElement>(`[data-trade-id="${tradeId}"]`) : null;
+      if (!row) return;
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Brief highlight so the eye lands on the new trade.
+      gsap.fromTo(row,
+        { boxShadow: "0 0 0 2px rgba(0,200,150,0.7), 0 0 24px rgba(0,200,150,0.35)" },
+        { boxShadow: "0 0 0 0px rgba(0,200,150,0), 0 0 0px rgba(0,200,150,0)", duration: 1.6, delay: 0.5, ease: "power2.out", clearProps: "boxShadow" });
+    }, COLLAPSE_MS);
   }
 
   return (
@@ -86,6 +105,7 @@ export function AddTradePanel({ backtestId, instrument, periodStart, periodEnd }
                 periodStart={periodStart}
                 periodEnd={periodEnd}
                 initialEntryDate={lastEntryDate}
+                minEntryDate={lastTradeEnd}
                 onSaved={handleSaved}
               />
             </div>
@@ -93,12 +113,11 @@ export function AddTradePanel({ backtestId, instrument, periodStart, periodEnd }
         </div>
       </div>
 
-      <SuccessToast
-        open={toastOpen}
+      <SuccessModal
+        open={savedTradeId !== null}
         message="Trade enregistré"
         description="Le trade a bien été ajouté au backtest."
-        duration={3500}
-        onClose={() => setToastOpen(false)}
+        onClose={handleModalClosed}
       />
     </>
   );

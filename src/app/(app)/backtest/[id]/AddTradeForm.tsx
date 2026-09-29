@@ -294,12 +294,15 @@ function CheckField({ name, label, field }: { name: string; label: string; field
 
 /* ─── Form ──────────────────────────────────────────────────────────────── */
 
+/** Date as local wall time "YYYY-MM-DDTHH:mm" — the picker reads/writes local components, not UTC. */
+function toLocalInput(d: Date) {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /** Now if it falls within the backtest period, otherwise the period start — "YYYY-MM-DDTHH:mm". */
 function defaultEntryDate(periodStart: string, periodEnd: string) {
-  // Local wall time — the picker reads/writes local components, not UTC.
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  const now = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  const now = toLocalInput(new Date());
   const today = now.slice(0, 10);
   return today >= periodStart && today <= periodEnd ? now : `${periodStart}T00:00`;
 }
@@ -314,10 +317,12 @@ interface AddTradeFormProps {
   /** "YYYY-MM-DDTHH:mm" — prefill entry date (e.g. last saved trade's) */
   initialEntryDate?: string;
   /** Called after the trade is persisted, with the entry date that was used */
-  onSaved?: (entryDate: string) => void;
+  onSaved?: (tradeId: string, entryDate: string) => void;
+  /** ISO — the entry date is never prefilled earlier than this (previous trade's exit) */
+  minEntryDate?: string;
 }
 
-export function AddTradeForm({ backtestId, instrument, periodStart, periodEnd, initialEntryDate, onSaved }: AddTradeFormProps) {
+export function AddTradeForm({ backtestId, instrument, periodStart, periodEnd, initialEntryDate, onSaved, minEntryDate }: AddTradeFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, startTransition] = useTransition();
   const [direction, setDirection] = useState<"LONG" | "SHORT">("LONG");
@@ -333,7 +338,12 @@ export function AddTradeForm({ backtestId, instrument, periodStart, periodEnd, i
   const setSel = (key: string) => (v: string) => setSelects((prev) => ({ ...prev, [key]: v }));
   const [error, setError] = useState<string | null>(null);
 
-  const [entryDate, setEntryDate] = useState(() => initialEntryDate ?? defaultEntryDate(periodStart, periodEnd));
+  const [entryDate, setEntryDate] = useState(() => {
+    const base = initialEntryDate ?? defaultEntryDate(periodStart, periodEnd);
+    const floor = minEntryDate ? toLocalInput(new Date(minEntryDate)) : "";
+    // Same fixed-width format → lexicographic compare is chronological.
+    return floor > base ? floor : base;
+  });
   const [exitDate, setExitDate] = useState("");
   const [exitDateTouched, setExitDateTouched] = useState(false);
   // tempMedia holds uploads done before the trade exists (tradeId="temp")
@@ -374,9 +384,9 @@ export function AddTradeForm({ backtestId, instrument, periodStart, periodEnd, i
     startTransition(async () => {
       try {
         const storageKeys = tempMedia.map((m) => m.storageKey).filter(Boolean) as string[];
-        await addBacktestTrade(backtestId, fd, storageKeys);
+        const tradeId = await addBacktestTrade(backtestId, fd, storageKeys);
         // The parent panel collapses and remounts the form, which clears all fields.
-        onSaved?.(entryDate);
+        onSaved?.(tradeId, entryDate);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to add trade.");
       }

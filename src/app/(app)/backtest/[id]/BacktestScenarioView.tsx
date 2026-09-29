@@ -399,6 +399,8 @@ export function BacktestScenarioView({
               return (
                 <div
                   key={trade.id}
+                  data-trade-id={trade.id}
+                  className="scroll-mt-24 rounded-xl"
                   style={missingData ? { opacity: 0.45 } : undefined}
                   title={missingData ? "Données non saisies pour ce scénario" : undefined}
                 >
