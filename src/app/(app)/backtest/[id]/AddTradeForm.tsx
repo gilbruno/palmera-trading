@@ -293,7 +293,27 @@ function CheckField({ name, label, field }: { name: string; label: string; field
 }
 
 /* ─── Form ──────────────────────────────────────────────────────────────── */
-export function AddTradeForm({ backtestId, instrument }: { backtestId: string; instrument: string }) {
+
+/** Now if it falls within the backtest period, otherwise the period start — "YYYY-MM-DDTHH:mm". */
+function defaultEntryDate(periodStart: string, periodEnd: string) {
+  // Local wall time — the picker reads/writes local components, not UTC.
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  const now = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  const today = now.slice(0, 10);
+  return today >= periodStart && today <= periodEnd ? now : `${periodStart}T00:00`;
+}
+
+interface AddTradeFormProps {
+  backtestId: string;
+  instrument: string;
+  /** "YYYY-MM-DD" */
+  periodStart: string;
+  /** "YYYY-MM-DD" */
+  periodEnd: string;
+}
+
+export function AddTradeForm({ backtestId, instrument, periodStart, periodEnd }: AddTradeFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const [isPending, startTransition] = useTransition();
   const [direction, setDirection] = useState<"LONG" | "SHORT">("LONG");
@@ -309,7 +329,7 @@ export function AddTradeForm({ backtestId, instrument }: { backtestId: string; i
   const setSel = (key: string) => (v: string) => setSelects((prev) => ({ ...prev, [key]: v }));
   const [error, setError] = useState<string | null>(null);
 
-  const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 16));
+  const [entryDate, setEntryDate] = useState(() => defaultEntryDate(periodStart, periodEnd));
   const [exitDate, setExitDate] = useState("");
   const [exitDateTouched, setExitDateTouched] = useState(false);
   // savedTradeId is set after the trade row is persisted; used by MediaUpload.
@@ -363,7 +383,7 @@ export function AddTradeForm({ backtestId, instrument }: { backtestId: string; i
         setOutcome1R("");
         setOutcome15R("");
         setSelects({ marketSession: "", timeframeEntry: "", timeframeTrend: "", liquiditySwept: "", biasHTF: "", biasMTF: "", marketStructure: "", ictModel: "", poi: "" });
-        setEntryDate(new Date().toISOString().slice(0, 16));
+        // Keep entryDate as-is: backtests are logged chronologically, so the next trade starts from the last one.
         setExitDate("");
         setExitDateTouched(false);
       } catch (err) {

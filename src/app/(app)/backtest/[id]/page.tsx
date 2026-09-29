@@ -144,7 +144,12 @@ export default async function BacktestDetailPage({
       />
 
       {/* ── Add Trade — collapsible panel ── */}
-      <AddTradePanel backtestId={backtest.id} instrument={backtest.instrument} />
+      <AddTradePanel
+        backtestId={backtest.id}
+        instrument={backtest.instrument}
+        periodStart={backtest.periodStart.toISOString().slice(0, 10)}
+        periodEnd={backtest.periodEnd.toISOString().slice(0, 10)}
+      />
 
       {/* ── Notes ── */}
       {backtest.notes && (

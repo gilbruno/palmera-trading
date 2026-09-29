@@ -8,7 +8,7 @@ import {
   useId,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Calendar, Clock, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Calendar, Clock, X } from "lucide-react";
 import gsap from "gsap";
 
 /* ─── Types ────────────────────────────────────────────────────────────────── */
@@ -30,6 +30,9 @@ interface DateTimePickerProps {
 }
 
 /* ─── Constants ────────────────────────────────────────────────────────────── */
+
+type ViewMode = "days" | "months" | "years";
+const YEARS_PER_PAGE = 12;
 
 const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 const MONTHS = [
@@ -237,6 +240,217 @@ function TimeSegment({ value, max, label, onChange }: TimeSegmentProps) {
   );
 }
 
+/* ─── Panel header (shared by days / months / years views) ─────────────────── */
+
+interface PanelHeaderProps {
+  label: string;
+  labelTitle?: string;
+  onLabelClick?: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+  prevTitle: string;
+  nextTitle: string;
+  onFastPrev?: () => void;
+  onFastNext?: () => void;
+  fastPrevTitle?: string;
+  fastNextTitle?: string;
+}
+
+function PanelHeader({
+  label, labelTitle, onLabelClick, onPrev, onNext, prevTitle, nextTitle,
+  onFastPrev, onFastNext, fastPrevTitle, fastNextTitle,
+}: PanelHeaderProps) {
+  const labelStyle: React.CSSProperties = {
+    fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+    fontWeight: 600,
+    fontSize: "0.9rem",
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    color: "var(--text-primary)",
+    background: "transparent",
+    border: "1px solid transparent",
+    borderRadius: 6,
+    padding: "3px 8px",
+    cursor: onLabelClick ? "pointer" : "default",
+    transition: "border-color 0.15s ease, color 0.15s ease, background 0.15s ease",
+  };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+      <div style={{ display: "flex", gap: 2 }}>
+        {onFastPrev && (
+          <NavButton onClick={onFastPrev} title={fastPrevTitle}>
+            <ChevronsLeft size={14} />
+          </NavButton>
+        )}
+        <NavButton onClick={onPrev} title={prevTitle}>
+          <ChevronLeft size={14} />
+        </NavButton>
+      </div>
+      {onLabelClick ? (
+        <button
+          type="button"
+          title={labelTitle}
+          onClick={onLabelClick}
+          style={labelStyle}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = "rgba(255,214,0,0.35)";
+            e.currentTarget.style.color = "var(--accent-primary)";
+            e.currentTarget.style.background = "rgba(255,214,0,0.06)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = "transparent";
+            e.currentTarget.style.color = "var(--text-primary)";
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          {label}
+        </button>
+      ) : (
+        <span style={labelStyle}>{label}</span>
+      )}
+      <div style={{ display: "flex", gap: 2 }}>
+        <NavButton onClick={onNext} title={nextTitle}>
+          <ChevronRight size={14} />
+        </NavButton>
+        {onFastNext && (
+          <NavButton onClick={onFastNext} title={fastNextTitle}>
+            <ChevronsRight size={14} />
+          </NavButton>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Month / year cells ────────────────────────────────────────────────────── */
+
+interface PickCellProps {
+  label: string;
+  isSelected: boolean;
+  isCurrent: boolean;
+  isMuted?: boolean;
+  onClick: () => void;
+}
+
+function PickCell({ label, isSelected, isCurrent, isMuted = false, onClick }: PickCellProps) {
+  const ref = useRef<HTMLButtonElement>(null);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => {
+        if (!isSelected) gsap.to(ref.current, { backgroundColor: "rgba(255,214,0,0.1)", duration: 0.15 });
+      }}
+      onMouseLeave={() => {
+        if (!isSelected) gsap.to(ref.current, { backgroundColor: "rgba(255,214,0,0)", duration: 0.2 });
+      }}
+      style={{
+        height: 40,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+        fontWeight: isSelected || isCurrent ? 700 : 500,
+        fontSize: "0.9rem",
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        borderRadius: 6,
+        border: isCurrent && !isSelected ? "1px solid rgba(255,214,0,0.35)" : "1px solid transparent",
+        background: isSelected ? "linear-gradient(135deg, #FFD600 0%, #FFA500 100%)" : "transparent",
+        color: isSelected
+          ? "#1a1710"
+          : isCurrent
+          ? "var(--accent-primary)"
+          : isMuted
+          ? "var(--text-muted)"
+          : "var(--text-secondary)",
+        boxShadow: isSelected ? "0 2px 12px -2px rgba(255,214,0,0.4)" : "none",
+        cursor: "pointer",
+        padding: 0,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+interface MonthGridProps {
+  viewYear: number;
+  selectedYear: number | null;
+  selectedMonth: number | null;
+  onSelectMonth: (month: number) => void;
+  onPrevYear: () => void;
+  onNextYear: () => void;
+  onHeaderClick: () => void;
+}
+
+function MonthGrid({ viewYear, selectedYear, selectedMonth, onSelectMonth, onPrevYear, onNextYear, onHeaderClick }: MonthGridProps) {
+  const today = new Date();
+  return (
+    <div>
+      <PanelHeader
+        label={String(viewYear)}
+        labelTitle="Choose year"
+        onLabelClick={onHeaderClick}
+        onPrev={onPrevYear}
+        onNext={onNextYear}
+        prevTitle="Previous year"
+        nextTitle="Next year"
+      />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4 }}>
+        {MONTHS.map((m, i) => (
+          <PickCell
+            key={m}
+            label={m.slice(0, 3)}
+            isSelected={selectedYear === viewYear && selectedMonth === i}
+            isCurrent={today.getFullYear() === viewYear && today.getMonth() === i}
+            onClick={() => onSelectMonth(i)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface YearGridProps {
+  viewYear: number;
+  selectedYear: number | null;
+  onSelectYear: (year: number) => void;
+  onPrevPage: () => void;
+  onNextPage: () => void;
+}
+
+function YearGrid({ viewYear, selectedYear, onSelectYear, onPrevPage, onNextPage }: YearGridProps) {
+  const start = Math.floor(viewYear / YEARS_PER_PAGE) * YEARS_PER_PAGE;
+  const years = Array.from({ length: YEARS_PER_PAGE }, (_, i) => start + i);
+  const currentYear = new Date().getFullYear();
+  return (
+    <div>
+      <PanelHeader
+        label={`${start} – ${start + YEARS_PER_PAGE - 1}`}
+        onPrev={onPrevPage}
+        onNext={onNextPage}
+        prevTitle={`Previous ${YEARS_PER_PAGE} years`}
+        nextTitle={`Next ${YEARS_PER_PAGE} years`}
+      />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4 }}>
+        {years.map((y) => (
+          <PickCell
+            key={y}
+            label={String(y)}
+            isSelected={selectedYear === y}
+            isCurrent={currentYear === y}
+            isMuted={y > currentYear}
+            onClick={() => onSelectYear(y)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Calendar grid ─────────────────────────────────────────────────────────── */
 
 interface CalendarGridProps {
@@ -248,12 +462,15 @@ interface CalendarGridProps {
   onSelectDay: (day: number) => void;
   onPrevMonth: () => void;
   onNextMonth: () => void;
+  onPrevYear: () => void;
+  onNextYear: () => void;
+  onHeaderClick: () => void;
 }
 
 function CalendarGrid({
   viewYear, viewMonth,
   selectedYear, selectedMonth, selectedDay,
-  onSelectDay, onPrevMonth, onNextMonth,
+  onSelectDay, onPrevMonth, onNextMonth, onPrevYear, onNextYear, onHeaderClick,
 }: CalendarGridProps) {
   const daysInMonth = getDaysInMonth(viewYear, viewMonth);
   const offset = getFirstDayOffset(viewYear, viewMonth);
@@ -272,24 +489,19 @@ function CalendarGrid({
   return (
     <div>
       {/* Month / Year nav */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <NavButton onClick={onPrevMonth} title="Previous month">
-          <ChevronLeft size={14} />
-        </NavButton>
-        <span style={{
-          fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
-          fontWeight: 600,
-          fontSize: "0.9rem",
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          color: "var(--text-primary)",
-        }}>
-          {MONTHS[viewMonth]} {viewYear}
-        </span>
-        <NavButton onClick={onNextMonth} title="Next month">
-          <ChevronRight size={14} />
-        </NavButton>
-      </div>
+      <PanelHeader
+        label={`${MONTHS[viewMonth]} ${viewYear}`}
+        onLabelClick={onHeaderClick}
+        labelTitle="Choose month & year"
+        onPrev={onPrevMonth}
+        onNext={onNextMonth}
+        prevTitle="Previous month"
+        nextTitle="Next month"
+        onFastPrev={onPrevYear}
+        onFastNext={onNextYear}
+        fastPrevTitle="Previous year"
+        fastNextTitle="Next year"
+      />
 
       {/* Day headers */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 4 }}>
@@ -430,6 +642,7 @@ function DayCell({ day, isSelected, isToday, isWeekend, onClick }: DayCellProps)
 interface PopupProps {
   style: React.CSSProperties;
   popupRef: React.RefObject<HTMLDivElement | null>;
+  viewMode: ViewMode;
   viewYear: number;
   viewMonth: number;
   selectedYear: number | null;
@@ -441,6 +654,10 @@ interface PopupProps {
   onSelectDay: (day: number) => void;
   onPrevMonth: () => void;
   onNextMonth: () => void;
+  onShiftYear: (delta: number) => void;
+  onViewModeChange: (mode: ViewMode) => void;
+  onSelectMonth: (month: number) => void;
+  onSelectYear: (year: number) => void;
   onHourChange: (h: number) => void;
   onMinuteChange: (m: number) => void;
   onClear: () => void;
@@ -448,8 +665,9 @@ interface PopupProps {
 }
 
 function Popup({
-  style, popupRef, viewYear, viewMonth, selectedYear, selectedMonth, selectedDay,
+  style, popupRef, viewMode, viewYear, viewMonth, selectedYear, selectedMonth, selectedDay,
   hour, minute, dateOnly, onSelectDay, onPrevMonth, onNextMonth,
+  onShiftYear, onViewModeChange, onSelectMonth, onSelectYear,
   onHourChange, onMinuteChange, onClear, onClose,
 }: PopupProps) {
   useEffect(() => {
@@ -489,18 +707,43 @@ function Popup({
         borderRadius: "0 0 4px 4px",
       }} />
 
-      <CalendarGrid
-        viewYear={viewYear}
-        viewMonth={viewMonth}
-        selectedYear={selectedYear}
-        selectedMonth={selectedMonth}
-        selectedDay={selectedDay}
-        onSelectDay={onSelectDay}
-        onPrevMonth={onPrevMonth}
-        onNextMonth={onNextMonth}
-      />
+      {viewMode === "days" && (
+        <CalendarGrid
+          viewYear={viewYear}
+          viewMonth={viewMonth}
+          selectedYear={selectedYear}
+          selectedMonth={selectedMonth}
+          selectedDay={selectedDay}
+          onSelectDay={onSelectDay}
+          onPrevMonth={onPrevMonth}
+          onNextMonth={onNextMonth}
+          onPrevYear={() => onShiftYear(-1)}
+          onNextYear={() => onShiftYear(1)}
+          onHeaderClick={() => onViewModeChange("months")}
+        />
+      )}
+      {viewMode === "months" && (
+        <MonthGrid
+          viewYear={viewYear}
+          selectedYear={selectedYear}
+          selectedMonth={selectedMonth}
+          onSelectMonth={onSelectMonth}
+          onPrevYear={() => onShiftYear(-1)}
+          onNextYear={() => onShiftYear(1)}
+          onHeaderClick={() => onViewModeChange("years")}
+        />
+      )}
+      {viewMode === "years" && (
+        <YearGrid
+          viewYear={viewYear}
+          selectedYear={selectedYear}
+          onSelectYear={onSelectYear}
+          onPrevPage={() => onShiftYear(-YEARS_PER_PAGE)}
+          onNextPage={() => onShiftYear(YEARS_PER_PAGE)}
+        />
+      )}
 
-      {!dateOnly && (
+      {!dateOnly && viewMode === "days" && (
         <>
           {/* Divider */}
           <div style={{
@@ -619,6 +862,9 @@ export function DateTimePicker({
   const [viewMonth, setViewMonth] = useState(parsed?.month ?? now.getMonth());
   const [hour, setHour] = useState(parsed?.hour ?? 0);
   const [minute, setMinute] = useState(parsed?.minute ?? 0);
+  const [viewMode, setViewMode] = useState<ViewMode>("days");
+  const viewModeRef = useRef<ViewMode>("days");
+  useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
 
   const selectedYear = parsed?.year ?? null;
   const selectedMonth = parsed?.month ?? null;
@@ -635,7 +881,7 @@ export function DateTimePicker({
     if (!triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const panelHeight = dateOnly ? 230 : 310;
+    const panelHeight = dateOnly ? 280 : 310; // months/years views are ~275px
     const openAbove = spaceBelow < panelHeight + 8 && rect.top > panelHeight + 8;
 
     setPopupStyle({
@@ -653,6 +899,7 @@ export function DateTimePicker({
       setMinute(parsed.minute);
     }
 
+    setViewMode("days");
     setOpen(true);
   }
 
@@ -697,6 +944,20 @@ export function DateTimePicker({
     else setViewMonth((m) => m + 1);
   }
 
+  function shiftYear(delta: number) {
+    setViewYear((y) => y + delta);
+  }
+
+  function handleSelectMonth(month: number) {
+    setViewMonth(month);
+    setViewMode("days");
+  }
+
+  function handleSelectYear(year: number) {
+    setViewYear(year);
+    setViewMode("months");
+  }
+
   // Close on outside click — must not fire when clicking inside the portal popup
   const handleOutsideClick = useCallback((e: MouseEvent) => {
     if (triggerRef.current?.contains(e.target as Node)) return;
@@ -715,7 +976,12 @@ export function DateTimePicker({
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") close();
+      if (e.key !== "Escape") return;
+      // Step back up one level (years → months → days) before closing
+      const mode = viewModeRef.current;
+      if (mode === "years") setViewMode("months");
+      else if (mode === "months") setViewMode("days");
+      else close();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -813,6 +1079,7 @@ export function DateTimePicker({
         <Popup
           style={popupStyle}
           popupRef={popupRef}
+          viewMode={viewMode}
           viewYear={viewYear}
           viewMonth={viewMonth}
           selectedYear={selectedYear}
@@ -824,6 +1091,10 @@ export function DateTimePicker({
           onSelectDay={handleSelectDay}
           onPrevMonth={prevMonth}
           onNextMonth={nextMonth}
+          onShiftYear={shiftYear}
+          onViewModeChange={setViewMode}
+          onSelectMonth={handleSelectMonth}
+          onSelectYear={handleSelectYear}
           onHourChange={handleHourChange}
           onMinuteChange={handleMinuteChange}
           onClear={handleClear}
