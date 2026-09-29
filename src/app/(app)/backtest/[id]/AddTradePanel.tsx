@@ -13,7 +13,7 @@ interface AddTradePanelProps {
   periodStart: string;
   /** "YYYY-MM-DD" */
   periodEnd: string;
-  /** ISO — latest exit date among existing trades */
+  /** ISO — exit date of the last trade (entry if still open) */
   lastTradeEnd?: string;
 }
 
@@ -24,13 +24,10 @@ export function AddTradePanel({ backtestId, instrument, periodStart, periodEnd, 
   const [open, setOpen] = useState(false);
   // Bumped after each save to remount the form with empty fields.
   const [formKey, setFormKey] = useState(0);
-  // Backtests are logged chronologically: the next trade starts from the last one's entry date.
-  const [lastEntryDate, setLastEntryDate] = useState<string | undefined>(undefined);
   const [savedTradeId, setSavedTradeId] = useState<string | null>(null);
 
   // Step 1 — trade persisted: show the success modal.
-  function handleSaved(tradeId: string, entryDate: string) {
-    setLastEntryDate(entryDate);
+  function handleSaved(tradeId: string) {
     setSavedTradeId(tradeId);
   }
 
@@ -99,13 +96,13 @@ export function AddTradePanel({ backtestId, instrument, periodStart, periodEnd, 
           <div className="min-h-0 overflow-hidden">
             <div style={{ borderTop: "1px solid var(--border)" }}>
               <AddTradeForm
-                key={formKey}
+                // Also remount when the last trade changes (edit/delete) so the entry-date prefill stays in sync.
+                key={`${formKey}-${lastTradeEnd ?? ""}`}
                 backtestId={backtestId}
                 instrument={instrument}
                 periodStart={periodStart}
                 periodEnd={periodEnd}
-                initialEntryDate={lastEntryDate}
-                minEntryDate={lastTradeEnd}
+                lastTradeEnd={lastTradeEnd}
                 onSaved={handleSaved}
               />
             </div>

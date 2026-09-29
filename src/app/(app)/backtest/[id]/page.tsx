@@ -58,11 +58,9 @@ export default async function BacktestDetailPage({
   const periodFmt = (d: Date) =>
     d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-  // Latest exit (or entry, if still open) across trades — floor for the next trade's entry date.
-  const lastTradeEnd = backtest.trades.reduce<Date | null>((max, t) => {
-    const end = t.exitDate ?? t.entryDate;
-    return !max || end > max ? end : max;
-  }, null);
+  // Exit of the last trade (entry if still open) — prefill for the next trade's entry date.
+  const lastTrade = backtest.trades.at(-1);
+  const lastTradeEnd = lastTrade ? (lastTrade.exitDate ?? lastTrade.entryDate) : null;
 
   const completeAction = updateBacktestStatus.bind(null, id, "COMPLETED");
   const reopenAction = updateBacktestStatus.bind(null, id, "IN_PROGRESS");
